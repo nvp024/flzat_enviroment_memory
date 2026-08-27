@@ -1,0 +1,4 @@
+# Phase 7 persistent memory runtime. Model files are pinned by revision in code.
+numpy==1.26.4
+chromadb==1.5.9
+sentence-transformers==6.0.0

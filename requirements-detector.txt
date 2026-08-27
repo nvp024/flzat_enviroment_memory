@@ -1,0 +1,4 @@
+# Phase 5 detector runtime. The model asset is pinned separately by SHA-256.
+numpy==1.26.4
+ultralytics==8.3.0
+ultralytics-thop==2.0.0

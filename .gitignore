@@ -1,0 +1,11 @@
+build/
+install/
+log/
+.pytest_cache/
+__pycache__/
+*.py[cod]
+.coverage
+.venv/
+.vscode/
+.idea/
+src/frontier_exploration_ros2/

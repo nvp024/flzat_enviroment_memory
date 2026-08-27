@@ -1,0 +1,16 @@
+observation_manager:
+  ros__parameters:
+    detector_model_path: "~/.local/share/flzat/environment_memory/models/yolov8n-v8.3.0.pt"
+    detector_model_sha256: "f59b3d833e2ff32e194b5bb8e08d211dc7c5bdf144b90d2c8412c47ccfc83b36"
+    detector_confidence_threshold: 0.35
+    detector_nms_iou_threshold: 0.50
+    detector_max_detections: 8
+    detector_ignored_classes: ["person"]
+    depth_central_fraction: 0.60
+    depth_minimum_m: 0.20
+    depth_maximum_m: 10.0
+    depth_minimum_valid_samples: 30
+    depth_minimum_valid_ratio: 0.30
+    depth_mad_scale: 3.0
+    depth_minimum_outlier_band_m: 0.02
+    depth_maximum_normalized_dispersion: 0.10

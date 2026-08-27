@@ -1,0 +1,5 @@
+repositories:
+  src/frontier_exploration_ros2:
+    type: git
+    url: https://github.com/mertgulerx/frontier_exploration_ros2.git
+    version: b0fad500e5c81ad3154f0469ca283b2702a3f90c

@@ -1,0 +1,13 @@
+string environment_id
+string map_id
+string observation_id
+builtin_interfaces/Time observation_stamp
+builtin_interfaces/Time depth_stamp
+robot_interfaces/SemanticObject semantic
+robot_interfaces/ObjectDetection2D detection
+geometry_msgs/PointStamped map_position
+geometry_msgs/PoseStamped robot_pose
+string scene
+float32 localization_quality
+string image_ref
+sensor_msgs/CompressedImage image
