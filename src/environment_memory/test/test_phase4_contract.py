@@ -43,8 +43,12 @@ def test_frontier_configuration_uses_nav2_and_completion_hook():
 
 def test_observation_manager_locks_phase4_sensor_contracts():
     source = (
-        PACKAGE_ROOT / "environment_memory" / "observation_manager.py"
+        PACKAGE_ROOT
+        / "environment_memory"
+        / "perception"
+        / "observation_manager.py"
     ).read_text(encoding="utf-8")
+    package = (PACKAGE_ROOT / "package.xml").read_text(encoding="utf-8")
 
     assert 'declare_parameter("sync_queue_size", 10)' in source
     assert 'declare_parameter("sync_slop_s", 0.08)' in source
@@ -54,3 +58,7 @@ def test_observation_manager_locks_phase4_sensor_contracts():
     assert 'if depth.encoding != "32FC1"' in source
     assert "Time.from_msg(rgb.header.stamp)" in source
     assert "lookup_transform" in source
+    assert "image_to_bgr" in source
+    assert "image_to_depth_32fc1" in source
+    assert "cv_bridge" not in source
+    assert "<exec_depend>cv_bridge</exec_depend>" not in package

@@ -2,9 +2,9 @@ import importlib.util
 
 import pytest
 
-from environment_memory.memory_record import embedding_text, new_record
-from environment_memory.memory_store import COLLECTION_NAME, ChromaMemoryStore
-from environment_memory.retrieval import ReadOnlyChromaMemoryStore
+from environment_memory.storage.memory_record import embedding_text, new_record
+from environment_memory.storage.memory_store import COLLECTION_NAME, ChromaMemoryStore
+from environment_memory.retrieval.search import ReadOnlyChromaMemoryStore
 from test_memory_record import observation
 
 

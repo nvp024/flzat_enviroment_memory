@@ -2,9 +2,9 @@ from dataclasses import replace
 
 import pytest
 
-from environment_memory.memory_service import MemoryService
-from environment_memory.memory_store import InMemoryStore
-from environment_memory.memory_record import MapPosition
+from environment_memory.storage.memory_service import MemoryService
+from environment_memory.storage.memory_store import InMemoryStore
+from environment_memory.storage.memory_record import MapPosition
 from test_memory_record import observation
 
 

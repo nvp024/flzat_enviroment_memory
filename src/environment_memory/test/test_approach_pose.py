@@ -2,7 +2,7 @@ import math
 
 import pytest
 
-from environment_memory.approach_pose import (
+from environment_memory.assistant.approach_pose import (
     OccupancyGrid2D,
     Pose2D,
     generate_approach_candidates,

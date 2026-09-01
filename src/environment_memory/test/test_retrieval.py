@@ -3,10 +3,10 @@ from pathlib import Path
 
 import pytest
 
-from environment_memory.memory_record import MapPosition, embedding_text, new_record
-from environment_memory.memory_store import StoredMemory
-from environment_memory.readonly_memory import CompletedManifest
-from environment_memory.retrieval import (
+from environment_memory.storage.memory_record import MapPosition, embedding_text, new_record
+from environment_memory.storage.memory_store import StoredMemory
+from environment_memory.storage.readonly_memory import CompletedManifest
+from environment_memory.retrieval.search import (
     InMemoryReadOnlySearchStore,
     MemoryQuery,
     RetrievalError,

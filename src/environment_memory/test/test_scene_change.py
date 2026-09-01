@@ -1,6 +1,6 @@
 import numpy as np
 
-from environment_memory.scene_change import histogram_distance, hsv_histogram
+from environment_memory.perception.scene_change import histogram_distance, hsv_histogram
 
 
 def test_identical_images_have_zero_scene_distance():

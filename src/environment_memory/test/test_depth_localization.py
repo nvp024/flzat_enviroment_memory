@@ -3,7 +3,7 @@ import math
 import numpy as np
 import pytest
 
-from environment_memory.depth_localization import (
+from environment_memory.perception.depth_localization import (
     CameraIntrinsics,
     DepthLocalizationConfig,
     LocalizationError,

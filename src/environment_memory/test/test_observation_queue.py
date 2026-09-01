@@ -1,4 +1,4 @@
-from environment_memory.observation_queue import LatestObservationQueue
+from environment_memory.perception.observation_queue import LatestObservationQueue
 
 
 def test_queue_keeps_one_active_and_latest_pending():

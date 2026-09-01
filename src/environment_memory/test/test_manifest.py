@@ -3,7 +3,7 @@ import json
 
 import pytest
 
-from environment_memory.manifest import ManifestError, ManifestManager
+from environment_memory.storage.manifest import ManifestError, ManifestManager
 
 
 def test_incomplete_checkpoint_and_atomic_completion(tmp_path):

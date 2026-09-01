@@ -11,7 +11,7 @@ def test_phase7_dependencies_and_model_revision_are_pinned():
         encoding="utf-8"
     )
     record = (
-        PACKAGE_ROOT / "environment_memory" / "memory_record.py"
+        PACKAGE_ROOT / "environment_memory" / "storage" / "memory_record.py"
     ).read_text(encoding="utf-8")
 
     assert "numpy==1.26.4" in requirements
@@ -34,7 +34,7 @@ def test_localized_observation_carries_keyframe_evidence():
 
 def test_memory_manager_is_write_only_phase7_component():
     source = (
-        PACKAGE_ROOT / "environment_memory" / "memory_manager.py"
+        PACKAGE_ROOT / "environment_memory" / "storage" / "memory_manager.py"
     ).read_text(encoding="utf-8")
     launch = (
         PACKAGE_ROOT / "launch" / "exploration_observation.launch.py"
@@ -49,25 +49,28 @@ def test_memory_manager_is_write_only_phase7_component():
     assert "ActionClient" not in source
 
     build_manager = (
-        PACKAGE_ROOT / "environment_memory" / "memory_build_manager.py"
+        PACKAGE_ROOT
+        / "environment_memory"
+        / "exploration"
+        / "memory_build_manager.py"
     ).read_text(encoding="utf-8")
     assert 'declare_parameter("storage_root", "")' in build_manager
     assert '"/environment_memory/status"' in build_manager
     readiness = (
-        PACKAGE_ROOT / "environment_memory" / "readiness.py"
+        PACKAGE_ROOT / "environment_memory" / "exploration" / "readiness.py"
     ).read_text(encoding="utf-8")
     assert "memory_manager_ready" in readiness
 
 
 def test_planned_thresholds_collection_and_manifest_schema_are_locked():
     dedup = (
-        PACKAGE_ROOT / "environment_memory" / "deduplication.py"
+        PACKAGE_ROOT / "environment_memory" / "storage" / "deduplication.py"
     ).read_text(encoding="utf-8")
     store = (
-        PACKAGE_ROOT / "environment_memory" / "memory_store.py"
+        PACKAGE_ROOT / "environment_memory" / "storage" / "memory_store.py"
     ).read_text(encoding="utf-8")
     manifest = (
-        PACKAGE_ROOT / "environment_memory" / "manifest.py"
+        PACKAGE_ROOT / "environment_memory" / "storage" / "manifest.py"
     ).read_text(encoding="utf-8")
 
     assert "SPATIAL_THRESHOLD_M = 0.60" in dedup

@@ -2,7 +2,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from environment_memory.semantic_batch import (
+from environment_memory.semantics.semantic_batch import (
     SemanticBatchAssembler,
     SemanticBatchError,
     join_semantics,

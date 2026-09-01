@@ -4,7 +4,7 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-from environment_memory.embedding import SentenceTransformerEmbedder
+from environment_memory.storage.embedding import SentenceTransformerEmbedder
 
 
 class FakeSentenceTransformer:

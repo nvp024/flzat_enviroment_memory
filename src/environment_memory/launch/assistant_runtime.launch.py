@@ -104,5 +104,23 @@ def generate_launch_description():
                     }
                 ],
             ),
+            Node(
+                package="environment_memory",
+                executable="memory_marker_publisher",
+                name="memory_marker_publisher",
+                output="screen",
+                emulate_tty=True,
+                parameters=[
+                    {
+                        **common,
+                        "use_sim_time": ParameterValue(
+                            LaunchConfiguration("use_sim_time"), value_type=bool
+                        ),
+                        "storage_root": ParameterValue(
+                            LaunchConfiguration("storage_root"), value_type=str
+                        ),
+                    }
+                ],
+            ),
         ]
     )

@@ -2,7 +2,7 @@ import math
 
 import pytest
 
-from environment_memory.transform_geometry import (
+from environment_memory.perception.transform_geometry import (
     RigidTransform,
     TransformGeometryError,
     transform_point,

@@ -1,6 +1,6 @@
 import pytest
 
-from environment_memory.keyframe_store import KeyframeError, KeyframeStore
+from environment_memory.storage.keyframe_store import KeyframeError, KeyframeStore
 
 
 JPEG = b"\xff\xd8keyframe-fixture\xff\xd9"

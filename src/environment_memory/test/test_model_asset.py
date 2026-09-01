@@ -2,7 +2,7 @@ import hashlib
 
 import pytest
 
-from environment_memory.model_asset import ModelAssetError, resolve_verified_model
+from environment_memory.perception.model_asset import ModelAssetError, resolve_verified_model
 
 
 def test_resolves_only_a_matching_model(tmp_path):

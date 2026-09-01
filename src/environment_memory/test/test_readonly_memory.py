@@ -3,7 +3,7 @@ import json
 
 import pytest
 
-from environment_memory.readonly_memory import (
+from environment_memory.storage.readonly_memory import (
     ReadOnlyMemoryError,
     load_completed_manifest,
 )

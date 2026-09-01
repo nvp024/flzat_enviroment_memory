@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from environment_memory.memory_record import (
+from environment_memory.storage.memory_record import (
     EMBEDDING_MODEL,
     IncomingMemoryObservation,
     MapPosition,

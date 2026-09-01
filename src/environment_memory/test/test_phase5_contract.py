@@ -39,7 +39,10 @@ def test_geometric_interface_keeps_phase5_separate_from_semantics_and_storage():
 
 def test_observation_manager_requires_exact_rgb_timestamped_transforms():
     source = (
-        PACKAGE_ROOT / "environment_memory" / "observation_manager.py"
+        PACKAGE_ROOT
+        / "environment_memory"
+        / "perception"
+        / "observation_manager.py"
     ).read_text(encoding="utf-8")
 
     assert "_require_exact_transform" in source

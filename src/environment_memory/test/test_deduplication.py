@@ -2,8 +2,8 @@ from dataclasses import replace
 
 import pytest
 
-from environment_memory.deduplication import merge_record, select_duplicate
-from environment_memory.memory_record import MapPosition, new_record
+from environment_memory.storage.deduplication import merge_record, select_duplicate
+from environment_memory.storage.memory_record import MapPosition, new_record
 from test_memory_record import observation
 
 

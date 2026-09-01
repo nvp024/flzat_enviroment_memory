@@ -24,16 +24,19 @@ setup(
     maintainer_email="simulation-team@example.com",
     description="Environment perception and persistent semantic-spatial memory",
     license="Apache-2.0",
+    tests_require=["pytest"],
     entry_points={
         "console_scripts": [
-            "memory_build_manager = environment_memory.memory_build_manager:main",
-            "memory_command_manager = environment_memory.memory_command_manager:main",
-            "memory_manager = environment_memory.memory_manager:main",
-            "memory_query_server = environment_memory.memory_query_server:main",
-            "observation_manager = environment_memory.observation_manager:main",
-            "query_memory = environment_memory.query_memory_cli:main",
+            "memory_build_manager = environment_memory.exploration.memory_build_manager:main",
+            "memory_command_manager = environment_memory.assistant.memory_command_manager:main",
+            "memory_manager = environment_memory.storage.memory_manager:main",
+            "memory_marker_publisher = "
+            "environment_memory.retrieval.memory_marker_publisher:main",
+            "memory_query_server = environment_memory.retrieval.memory_query_server:main",
+            "observation_manager = environment_memory.perception.observation_manager:main",
+            "query_memory = environment_memory.retrieval.query_memory_cli:main",
             "semantic_observation_manager = "
-            "environment_memory.semantic_observation_manager:main",
+            "environment_memory.semantics.semantic_observation_manager:main",
         ],
     },
 )

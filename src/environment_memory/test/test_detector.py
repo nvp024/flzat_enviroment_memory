@@ -2,7 +2,7 @@ from types import SimpleNamespace
 
 import numpy as np
 
-from environment_memory.detector import DetectorConfig, UltralyticsYoloDetector
+from environment_memory.perception.detector import DetectorConfig, UltralyticsYoloDetector
 
 
 class FakeModel:

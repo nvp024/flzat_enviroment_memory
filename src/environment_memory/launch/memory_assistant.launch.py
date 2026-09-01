@@ -14,7 +14,7 @@ from launch.actions import (
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
 
-from environment_memory.readonly_memory import load_completed_manifest
+from environment_memory.storage.readonly_memory import load_completed_manifest
 
 
 def _assistant_actions(context):

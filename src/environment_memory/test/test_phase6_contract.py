@@ -20,7 +20,10 @@ def test_phase6_internal_evidence_interface_is_detector_linked():
 
 def test_semantic_manager_uses_shared_action_and_publishes_missing_endpoint():
     source = (
-        PACKAGE_ROOT / "environment_memory" / "semantic_observation_manager.py"
+        PACKAGE_ROOT
+        / "environment_memory"
+        / "semantics"
+        / "semantic_observation_manager.py"
     ).read_text(encoding="utf-8")
 
     assert '"/vlm/analyze_environment"' in source
@@ -45,16 +48,22 @@ def test_build_launch_restores_phase6_manager():
 
 def test_phase5_handoff_and_finalization_wait_for_semantic_drain():
     observation = (
-        PACKAGE_ROOT / "environment_memory" / "observation_manager.py"
+        PACKAGE_ROOT
+        / "environment_memory"
+        / "perception"
+        / "observation_manager.py"
     ).read_text(encoding="utf-8")
     memory = (
-        PACKAGE_ROOT / "environment_memory" / "memory_manager.py"
+        PACKAGE_ROOT / "environment_memory" / "storage" / "memory_manager.py"
     ).read_text(encoding="utf-8")
     build = (
-        PACKAGE_ROOT / "environment_memory" / "memory_build_manager.py"
+        PACKAGE_ROOT
+        / "environment_memory"
+        / "exploration"
+        / "memory_build_manager.py"
     ).read_text(encoding="utf-8")
     readiness = (
-        PACKAGE_ROOT / "environment_memory" / "readiness.py"
+        PACKAGE_ROOT / "environment_memory" / "exploration" / "readiness.py"
     ).read_text(encoding="utf-8")
 
     assert '"/environment_memory/vlm_observations"' in observation

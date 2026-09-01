@@ -1,6 +1,6 @@
 import math
 
-from environment_memory.trigger_policy import (
+from environment_memory.perception.trigger_policy import (
     ObservationTriggerPolicy,
     Pose2D,
     TriggerReason,

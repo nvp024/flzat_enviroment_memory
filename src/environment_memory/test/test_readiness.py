@@ -1,4 +1,4 @@
-from environment_memory.readiness import ReadinessSnapshot
+from environment_memory.exploration.readiness import ReadinessSnapshot
 
 
 def test_readiness_lists_every_missing_contract():

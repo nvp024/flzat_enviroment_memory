@@ -1,6 +1,6 @@
 import pytest
 
-from environment_memory.command_intent import (
+from environment_memory.assistant.command_intent import (
     CommandError,
     CommandMatch,
     Intent,
