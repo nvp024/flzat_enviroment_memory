@@ -1,0 +1,14 @@
+{
+  "schema_version": "environment_memory.seeded_oracle.v1",
+  "source_environment": "hotel_demo_14_seeded",
+  "source_map_id": "a8228e3b-eb9d-467c-8230-006684dfbbec",
+  "frame_id": "map",
+  "objects": {
+    "bench": [2.2, 1.25, 0.175],
+    "chest": [5.0, 4.25, 0.16],
+    "fan": [5.0, 7.3, 0.425],
+    "basket": [6.8, 4.3, 0.14],
+    "vase": [8.7, 6.65, 0.475],
+    "plant": [6.0, -1.4, 0.21]
+  }
+}

@@ -57,6 +57,7 @@ def generate_launch_description():
         launch_arguments={
             "backend": LaunchConfiguration("vlm_backend"),
             "model_id": LaunchConfiguration("vlm_model_id"),
+            "model_revision": LaunchConfiguration("vlm_model_revision"),
             "device": LaunchConfiguration("vlm_device"),
             "local_files_only": LaunchConfiguration("vlm_local_files_only"),
         }.items(),
@@ -79,11 +80,14 @@ def generate_launch_description():
             DeclareLaunchArgument("frontier_log_level", default_value="info"),
             DeclareLaunchArgument("readiness_timeout_s", default_value="300.0"),
             DeclareLaunchArgument("finalization_timeout_s", default_value="75.0"),
-            DeclareLaunchArgument("semantic_action_timeout_s", default_value="60.0"),
+            DeclareLaunchArgument("grounding_action_timeout_s", default_value="60.0"),
+            DeclareLaunchArgument("initial_observation_settle_s", default_value="1.0"),
             DeclareLaunchArgument(
-                "detector_config",
-                default_value=str(memory_share / "config" / "yolov8n_geometry.yaml"),
-                description="YOLO model asset and RGB-D geometry parameters.",
+                "observation_config",
+                default_value=str(
+                    memory_share / "config" / "vlm_grounding_geometry.yaml"
+                ),
+                description="VLM grounding and RGB-D geometry parameters.",
             ),
             DeclareLaunchArgument(
                 "enable_vlm",
@@ -93,11 +97,12 @@ def generate_launch_description():
                     "consumes completed localized semantic observations."
                 ),
             ),
-            DeclareLaunchArgument("vlm_backend", default_value="smolvlm2"),
+            DeclareLaunchArgument("vlm_backend", default_value="qwen3_vl"),
             DeclareLaunchArgument(
                 "vlm_model_id",
-                default_value="HuggingFaceTB/SmolVLM2-500M-Video-Instruct",
+                default_value="Qwen/Qwen3-VL-2B-Instruct",
             ),
+            DeclareLaunchArgument("vlm_model_revision", default_value="main"),
             DeclareLaunchArgument("vlm_device", default_value="auto"),
             DeclareLaunchArgument("vlm_local_files_only", default_value="false"),
             LogInfo(
@@ -147,11 +152,28 @@ def generate_launch_description():
                 output="screen",
                 emulate_tty=True,
                 parameters=[
-                    LaunchConfiguration("detector_config"),
+                    LaunchConfiguration("observation_config"),
                     {
                         "use_sim_time": ParameterValue(
                             LaunchConfiguration("use_sim_time"), value_type=bool
-                        )
+                        ),
+                        "environment_id": ParameterValue(
+                            LaunchConfiguration("environment_id"), value_type=str
+                        ),
+                        "map_id": ParameterValue(
+                            LaunchConfiguration("map_id"), value_type=str
+                        ),
+                        "storage_root": ParameterValue(
+                            LaunchConfiguration("storage_root"), value_type=str
+                        ),
+                        "grounding_action_timeout_s": ParameterValue(
+                            LaunchConfiguration("grounding_action_timeout_s"),
+                            value_type=float,
+                        ),
+                        "initial_settle_s": ParameterValue(
+                            LaunchConfiguration("initial_observation_settle_s"),
+                            value_type=float,
+                        ),
                     }
                 ],
             ),
@@ -184,30 +206,6 @@ def generate_launch_description():
                         "embedding_local_files_only": ParameterValue(
                             LaunchConfiguration("embedding_local_files_only"),
                             value_type=bool,
-                        ),
-                    }
-                ],
-            ),
-            Node(
-                package="environment_memory",
-                executable="semantic_observation_manager",
-                name="semantic_observation_manager",
-                output="screen",
-                emulate_tty=True,
-                parameters=[
-                    {
-                        "use_sim_time": ParameterValue(
-                            LaunchConfiguration("use_sim_time"), value_type=bool
-                        ),
-                        "environment_id": ParameterValue(
-                            LaunchConfiguration("environment_id"), value_type=str
-                        ),
-                        "map_id": ParameterValue(
-                            LaunchConfiguration("map_id"), value_type=str
-                        ),
-                        "action_timeout_s": ParameterValue(
-                            LaunchConfiguration("semantic_action_timeout_s"),
-                            value_type=float,
                         ),
                     }
                 ],

@@ -35,8 +35,6 @@ setup(
             "memory_query_server = environment_memory.retrieval.memory_query_server:main",
             "observation_manager = environment_memory.perception.observation_manager:main",
             "query_memory = environment_memory.retrieval.query_memory_cli:main",
-            "semantic_observation_manager = "
-            "environment_memory.semantics.semantic_observation_manager:main",
         ],
     },
 )

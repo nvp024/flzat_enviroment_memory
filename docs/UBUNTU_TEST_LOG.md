@@ -1,22 +1,50 @@
 # Nhật ký kiểm thử Ubuntu
 
-Cập nhật: 2026-09-01. Trạng thái dùng trong tài liệu: `PASS`, `FAIL`,
+Cập nhật: 2026-09-10. Trạng thái dùng trong tài liệu: `PASS`, `FAIL`,
 `PARTIAL`, `BLOCKED`, `NOT_RUN`.
 
 ## Tổng quan
 
+**Overall: PARTIAL.** Mode 1 và Mode 2 mới được kiểm thử riêng. Chưa có lần chạy
+liên tục tạo RAG thật từ Mode 1 rồi dùng chính RAG đó trong Mode 2.
+
 | Hạng mục | Trạng thái | Kết luận |
 |---|---|---|
 | Build ba workspace | PASS | ROS 2 Jazzy, Conda `py312` |
-| Unit test Environment Memory | PASS | 97 direct pytest tại lần kiểm tra NumPy 2 |
+| Unit test Environment Memory | PASS | 98 pass, 1 skip sau khi xóa YOLO legacy |
+| Qwen3 grounding offline | PASS | 11/11 response đúng schema; center P/R 90% |
+| GroundObjects + coordinator Step 2 | PARTIAL | Build/unit + synthetic replay PASS; replay thật NOT_RUN |
 | RGB-D/TF smoke | PASS | Camera, depth, scan, odom và TF hoạt động |
 | Mode 1 exploration + SLAM | PASS | Tự quét và lưu map `hotel_demo_14` |
-| Mode 1 semantic memory | PARTIAL | Map thành công nhưng object thật bằng 0 |
+| Mode 1 semantic memory/RAG | PARTIAL | Đã tích hợp; chưa chạy model + RGB-D E2E |
 | Mode 2 saved-map localization | PASS | AMCL tự initial pose `(0,0,0)` |
-| Mode 2 retrieval + text navigation | PASS | Dùng fixture có 6 object seeded |
-| Mode 1 → Mode 2 không seeded | NOT_RUN | Chưa có semantic object thật để truy xuất |
+| Mode 2 retrieval + text navigation | PASS riêng lẻ | Dùng fixture có 6 object seeded |
+| Mode 1 → RAG thật → Mode 2 | NOT_RUN | Chưa có semantic object thật để truy xuất |
 
 ## Các lần kiểm thử chính
+
+### 2026-09-10 — Step 2 VLM grounding integration
+
+- Thêm Qwen3-VL backend, prompt v4, parser nghiêm ngặt và action
+  `/vlm/ground_objects`.
+- Mode 1 dùng VLM grounding, gửi RGB bất đồng bộ và dùng frozen depth/TF để tạo
+  `LocalizedObjectObservation` tối thiểu.
+- Đã xóa pipeline YOLO/Ultralytics và semantic enrichment trung gian; không
+  còn launch flag rollback.
+- Có queue `1 active + 1 latest pending`, timeout, ID matching, persistence ACK,
+  drain và `observations.jsonl`.
+- Clean build `robot_interfaces`, `vlm_pipeline`,
+  `environment_memory_interfaces`, `environment_memory`: PASS.
+- FLZAT Robot regression sau cleanup: 86 PASS, trong đó VLM package 35 PASS.
+- Direct Environment Memory tests sau cleanup: 98 PASS, 1 SKIPPED.
+- ROS interface/launch contract: chỉ còn `RunVlm`, `GroundObjects` và
+  `LocalizedObjectObservation`; interface/argument YOLO cũ không còn.
+- ObservationManager VLM-only khởi tạo và shutdown trực tiếp trong ROS: PASS.
+- Synthetic replay `bbox → depth → TF → non-seeded store`: PASS; sai số oracle
+  `≤ 0.20 m`, ba observation merge thành một record có `seen_count=3`.
+- Launch `--show-args`: PASS, default `qwen3_vl` và Qwen3-VL-2B.
+- Runtime model/replay: NOT_RUN; Conda `py312` hiện thiếu `qwen_vl_utils` và
+  workspace chưa có recorded depth/CameraInfo/TF bundle.
 
 ### 2026-08-28 — build và integration smoke
 
@@ -59,7 +87,8 @@ Conda py312 rebuild: PASS
 ```
 
 - `hotel_demo_14` không có semantic object hợp lệ (`objects=0`).
-- Kết luận: mapping PASS; YOLO/VLM/persistence semantic chưa đạt E2E.
+- Kết luận: mapping PASS riêng lẻ; tạo RAG từ YOLO/VLM chưa thành công. Máy hiện
+  tại không đủ tài nguyên để kiểm thử ổn định model mạnh hơn.
 
 ### 2026-08-31 — Mode 2 seeded fixture
 
@@ -122,7 +151,7 @@ set -o pipefail
 ros2 launch environment_memory autonomous_memory_build.launch.py \
   environment_id:="$RUN_ENV_ID" \
   headless:=false use_rviz:=true use_sim_time:=true \
-  semantic_action_timeout_s:=300.0 \
+  grounding_action_timeout_s:=300.0 \
   2>&1 | tee "$RUN_DIR/terminal.log"
 ```
 
@@ -167,7 +196,7 @@ source <project-root>/flzat_enviroment_memory/install/setup.bash
 - Deduplication runtime qua nhiều góc nhìn.
 - Ambiguous/low-score command phải không làm robot di chuyển.
 - Hash/count Chroma không đổi sau Mode 2.
-- Qwen2-VL-2B và VLM-only bounding box trên Google Colab.
+- Qwen3-VL-2B local/Jetson runtime và synchronized RGB-D replay.
 
 ## Mẫu ghi session mới
 
@@ -191,5 +220,5 @@ Kết luận và bước tiếp theo:
 |---|---|---|
 | 2026-08-28 | Build + sensor smoke | PARTIAL |
 | 2026-08-29 | NumPy 2 converter | PASS |
-| 2026-08-31 | Mode 1 SLAM/map | PASS mapping, PARTIAL semantic |
-| 2026-08-31 | Mode 2 seeded text navigation | PASS |
+| 2026-08-31 | Mode 1 SLAM/map | PASS riêng lẻ, RAG BLOCKED |
+| 2026-08-31 | Mode 2 seeded text navigation | PASS riêng lẻ |

@@ -5,33 +5,38 @@ bộ nhớ đó để tìm kiếm, trả lời và điều hướng tới vật 
 
 ## Trạng thái hiện tại
 
+**Toàn bộ flow Mode 1 → tạo RAG → Mode 2 chưa được kiểm thử end-to-end.** Step 2
+đã tích hợp VLM grounding vào code, nhưng chưa có replay RGB-D thật để nghiệm
+thu tọa độ với ground truth SDF.
+
 | Hạng mục | Trạng thái |
 |---|---|
-| Mode 1: frontier exploration + SLAM + lưu map | PASS |
-| RGB-D, CameraInfo và TF | PASS |
-| Mode 2: load map + AMCL + Nav2 | PASS |
-| Truy xuất Chroma và điều hướng bằng text command | PASS với dữ liệu seeded |
-| YOLO → VLM → semantic record → Chroma | Chưa xác nhận end-to-end |
-| VLM phát hiện trực tiếp bounding box | Đang nghiên cứu, chưa implement |
+| Mode 1: frontier exploration + SLAM + lưu map | PASS riêng lẻ |
+| RGB-D, CameraInfo và TF | PASS smoke riêng lẻ |
+| Qwen3-VL-2B → label + bbox Gazebo | PASS offline, 11 ảnh |
+| VLM bbox → depth + TF → memory | Đã implement; PASS unit/build, chưa replay thật |
+| Mode 2: load map + AMCL + Nav2 | PASS riêng lẻ |
+| Truy xuất Chroma và điều hướng bằng text command | PASS với RAG seeded |
+| Mode 1 → RAG thật → Mode 2 | Chưa hoàn thiện |
+| YOLO legacy | Đã xóa; Mode 1 chỉ còn VLM grounding |
 
-Mode 2 đã điều hướng thành công tới `bench` trong fixture
-`hotel_demo_14_seeded`. Mode 1 đã quét và lưu map, nhưng lần chạy
-`hotel_demo_14` không tạo object thật; sáu object dùng để kiểm thử Mode 2 là dữ
-liệu seeded.
+Mode 1 cũ đã quét và lưu map nhưng chưa tạo được RAG thật. Mode 2 đã điều hướng thành công tới
+`bench`, nhưng dùng fixture `hotel_demo_14_seeded`; sáu object này không phải
+output của lần chạy Mode 1.
 
 ## Hai chế độ vận hành
 
 ```text
 Mode 1
-Gazebo → SLAM/Nav2 → frontier exploration → RGB-D observation
-→ detector → depth + TF → VLM semantics → embedding → Chroma + saved map
+Gazebo → SLAM/Nav2 → frontier exploration → frozen RGB-D/TF observation
+→ Qwen3-VL label + bbox → depth + TF → minimal record → Chroma + saved map
 
 Mode 2
 Saved map + AMCL → text/speech command → embedding query → Top-K
 → safe approach pose → Nav2 NavigateToPose
 ```
 
-Hai public launch file:
+The package has exactly two public scenario entry points:
 
 - `autonomous_memory_build.launch.py`: quét map và ghi memory.
 - `memory_assistant.launch.py`: đọc memory và điều hướng; không sửa database.
@@ -41,8 +46,7 @@ Hai public launch file:
 ```text
 environment_memory/
 ├── exploration/   # Mode 1, frontier và map saving
-├── perception/    # RGB-D, detector, depth và TF
-├── semantics/     # VLM batch và semantic result
+├── perception/    # VLM grounding, RGB-D, depth và TF
 ├── storage/       # record, dedup, embedding, Chroma, manifest
 ├── retrieval/     # semantic query và CLI
 └── assistant/     # command, approach pose và Nav2
@@ -75,7 +79,7 @@ ros2 launch environment_memory autonomous_memory_build.launch.py \
   environment_id:=hotel_demo \
   headless:=false \
   use_rviz:=true \
-  semantic_action_timeout_s:=300.0
+  grounding_action_timeout_s:=300.0
 ```
 
 Nếu không truyền `map_id`, launch tự sinh UUID. Artifact mặc định được lưu tại:
@@ -85,6 +89,7 @@ Nếu không truyền `map_id`, launch tự sinh UUID. Artifact mặc định đ
 ├── chroma/
 ├── images/
 ├── maps/
+├── observations.jsonl
 └── manifest.json
 ```
 
@@ -123,9 +128,14 @@ ros2 run environment_memory query_memory "the fan" \
   robot.
 - Depth + CameraInfo tạo điểm 3D trong camera frame; TF chuyển điểm đó sang
   `map`.
-- VLM hiện chỉ bổ sung semantic, không được tự sinh tọa độ metric.
-- Chuyển sang VLM-only cần VLM trả bounding box; depth và TF vẫn chịu trách
-  nhiệm tính `(x, y, z)`.
+- VLM chỉ trả label và bbox chuẩn hóa; manager thêm ID/confidence bảo thủ và
+  chuyển bbox về pixel.
+- Depth, CameraInfo và TF tại timestamp chụp chịu trách nhiệm tính `(x,y,z)`
+  trong frame `map`; VLM không được tự sinh tọa độ metric.
+- Mode 1 chỉ dùng `/vlm/ground_objects`; YOLO, Ultralytics và semantic
+  enrichment trung gian đã được loại khỏi source và launch.
+- Runtime Qwen3-VL cần `torch`, `transformers` có class
+  `Qwen3VLForConditionalGeneration` và `qwen_vl_utils` trong Conda `py312`.
 - NumPy 2 trong Conda dùng bộ chuyển ROS Image thuần NumPy, không dùng Python
   `cv_bridge` đã compile với NumPy 1.x.
 

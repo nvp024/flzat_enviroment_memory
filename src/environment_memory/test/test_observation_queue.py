@@ -23,3 +23,18 @@ def test_lower_priority_does_not_replace_pending():
 
     assert not result.accepted
     assert queue.begin_next() == "high"
+
+
+def test_slow_active_inference_keeps_only_latest_pending_capture():
+    queue = LatestObservationQueue[str]()
+    queue.submit("active-vlm", 10)
+    assert queue.begin_next() == "active-vlm"
+
+    for index in range(5):
+        queue.submit(f"capture-{index}", 10)
+
+    assert queue.active is True
+    assert queue.has_pending is True
+    assert queue.begin_next() is None
+    queue.complete()
+    assert queue.begin_next() == "capture-4"

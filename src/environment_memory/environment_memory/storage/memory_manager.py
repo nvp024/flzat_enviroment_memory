@@ -107,6 +107,9 @@ class MemoryManager(Node):
         self._status_pub = self.create_publisher(
             String, "/environment_memory/status", reliable
         )
+        self._persistence_pub = self.create_publisher(
+            String, "/environment_memory/persistence_events", reliable
+        )
         self.create_subscription(
             LocalizedObjectObservation,
             "/environment_memory/localized_observations",
@@ -145,6 +148,11 @@ class MemoryManager(Node):
                 self._rejected += 1
                 self._last_reason = f"observation rejected: {exc}"
             self.get_logger().warn(self._last_reason)
+            self._publish_persistence_event(
+                message,
+                state="REJECTED",
+                reason=str(exc),
+            )
             self._publish_status()
             return
         with self._status_lock:
@@ -155,7 +163,37 @@ class MemoryManager(Node):
                 self._merged += 1
             operation = "created" if result.created else "merged"
             self._last_reason = f"{operation} object {result.record.object_id}"
+        self._publish_persistence_event(
+            message,
+            state="STORED",
+            object_id=result.record.object_id,
+            created=result.created,
+            seen_count=result.record.seen_count,
+        )
         self._publish_status()
+
+    def _publish_persistence_event(
+        self,
+        message: LocalizedObjectObservation,
+        *,
+        state: str,
+        object_id: str = "",
+        created: bool | None = None,
+        seen_count: int | None = None,
+        reason: str = "",
+    ) -> None:
+        payload = {
+            "observation_id": message.observation_id,
+            "detection_id": int(message.detection.detection_id),
+            "state": state,
+            "object_id": object_id,
+            "created": created,
+            "seen_count": seen_count,
+            "reason": reason,
+        }
+        self._persistence_pub.publish(
+            String(data=json.dumps(payload, separators=(",", ":"), sort_keys=True))
+        )
 
     def _convert_observation(
         self, message: LocalizedObjectObservation

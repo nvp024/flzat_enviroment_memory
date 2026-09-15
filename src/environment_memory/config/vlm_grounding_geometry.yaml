@@ -1,0 +1,13 @@
+observation_manager:
+  ros__parameters:
+    grounding_action_timeout_s: 60.0
+    grounding_max_detections: 20
+    initial_settle_s: 1.0
+    depth_central_fraction: 0.60
+    depth_minimum_m: 0.20
+    depth_maximum_m: 10.0
+    depth_minimum_valid_samples: 30
+    depth_minimum_valid_ratio: 0.30
+    depth_mad_scale: 3.0
+    depth_minimum_outlier_band_m: 0.02
+    depth_maximum_normalized_dispersion: 0.10

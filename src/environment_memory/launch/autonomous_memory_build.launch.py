@@ -34,13 +34,17 @@ def generate_launch_description():
             "finalization_timeout_s": LaunchConfiguration(
                 "finalization_timeout_s"
             ),
-            "semantic_action_timeout_s": LaunchConfiguration(
-                "semantic_action_timeout_s"
+            "grounding_action_timeout_s": LaunchConfiguration(
+                "grounding_action_timeout_s"
             ),
-            "detector_config": LaunchConfiguration("detector_config"),
+            "initial_observation_settle_s": LaunchConfiguration(
+                "initial_observation_settle_s"
+            ),
+            "observation_config": LaunchConfiguration("observation_config"),
             "enable_vlm": "true",
             "vlm_backend": LaunchConfiguration("vlm_backend"),
             "vlm_model_id": LaunchConfiguration("vlm_model_id"),
+            "vlm_model_revision": LaunchConfiguration("vlm_model_revision"),
             "vlm_device": LaunchConfiguration("vlm_device"),
             "vlm_local_files_only": LaunchConfiguration("vlm_local_files_only"),
         }.items(),
@@ -69,16 +73,20 @@ def generate_launch_description():
             DeclareLaunchArgument("frontier_log_level", default_value="info"),
             DeclareLaunchArgument("readiness_timeout_s", default_value="300.0"),
             DeclareLaunchArgument("finalization_timeout_s", default_value="75.0"),
-            DeclareLaunchArgument("semantic_action_timeout_s", default_value="60.0"),
+            DeclareLaunchArgument("grounding_action_timeout_s", default_value="60.0"),
+            DeclareLaunchArgument("initial_observation_settle_s", default_value="1.0"),
             DeclareLaunchArgument(
-                "detector_config",
-                default_value=str(memory_share / "config" / "yolov8n_geometry.yaml"),
+                "observation_config",
+                default_value=str(
+                    memory_share / "config" / "vlm_grounding_geometry.yaml"
+                ),
             ),
-            DeclareLaunchArgument("vlm_backend", default_value="smolvlm2"),
+            DeclareLaunchArgument("vlm_backend", default_value="qwen3_vl"),
             DeclareLaunchArgument(
                 "vlm_model_id",
-                default_value="HuggingFaceTB/SmolVLM2-500M-Video-Instruct",
+                default_value="Qwen/Qwen3-VL-2B-Instruct",
             ),
+            DeclareLaunchArgument("vlm_model_revision", default_value="main"),
             DeclareLaunchArgument("vlm_device", default_value="auto"),
             DeclareLaunchArgument("vlm_local_files_only", default_value="false"),
             LogInfo(

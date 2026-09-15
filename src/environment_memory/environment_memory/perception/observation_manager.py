@@ -1,11 +1,15 @@
-"""Trigger RGB-D observations, detect objects, and localize geometry."""
+"""Ground objects in frozen RGB-D observations and persist map geometry."""
 
 from __future__ import annotations
 
 import copy
+from dataclasses import dataclass
 import json
 import math
+from pathlib import Path
+import re
 import threading
+import time
 import uuid
 from typing import Optional
 
@@ -13,9 +17,12 @@ import cv2
 import message_filters
 import rclpy
 from action_msgs.msg import GoalStatus, GoalStatusArray
+from builtin_interfaces.msg import Time as TimeMessage
 from geometry_msgs.msg import PointStamped, PoseStamped
 from nav_msgs.msg import Odometry
 from rclpy.duration import Duration
+from rclpy.action import ActionClient
+from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
 from rclpy.qos import (
@@ -37,13 +44,12 @@ from environment_memory.perception.depth_localization import (
     intrinsics_from_camera_matrix,
     localize_detection,
 )
-from environment_memory.perception.detector import (
-    Detection2D,
-    DetectorConfig,
-    UltralyticsYoloDetector,
+from environment_memory.perception.grounding_contract import (
+    GroundedDetection,
+    validate_grounding_detections,
 )
-from environment_memory.perception.model_asset import resolve_verified_model
 from environment_memory.perception.observation_bundle import ObservationBundle
+from environment_memory.perception.observation_log import ObservationLifecycleLog
 from environment_memory.perception.observation_queue import LatestObservationQueue
 from environment_memory.perception.ros_image import image_to_bgr, image_to_depth_32fc1
 from environment_memory.perception.scene_change import histogram_distance, hsv_histogram
@@ -59,10 +65,10 @@ from environment_memory.perception.transform_geometry import (
 )
 from environment_memory_interfaces.msg import (
     ExplorationStatus,
-    GeometricObjectObservation,
-    VlmObservation,
+    LocalizedObjectObservation,
 )
-from robot_interfaces.msg import ObjectDetection2D
+from robot_interfaces.action import GroundObjects
+from robot_interfaces.msg import ObjectDetection2D, SemanticObject
 
 
 def _stamp_ns(stamp) -> int:
@@ -75,13 +81,26 @@ def _yaw_from_quaternion(rotation) -> float:
     return math.atan2(siny_cosp, cosy_cosp)
 
 
+@dataclass(frozen=True)
+class LocalizedGeometry:
+    """Internal geometry produced from one grounded detection and frozen TF."""
+
+    observation_stamp: TimeMessage
+    depth_stamp: TimeMessage
+    detection: ObjectDetection2D
+    map_position: PointStamped
+    robot_pose: PoseStamped
+    localization_quality: float
+
+
 class ObservationManager(Node):
-    """Capture triggered RGB-D bundles and localize YOLO detections in map."""
+    """Coordinate frozen RGB-D observations through VLM grounding and memory."""
 
     def __init__(self) -> None:
         super().__init__("observation_manager")
         self._declare_parameters()
         self._lock = threading.Lock()
+        self._callback_group = ReentrantCallbackGroup()
         self._camera_info: Optional[CameraInfo] = None
         self._scan: Optional[LaserScan] = None
         self._odometry: Optional[Odometry] = None
@@ -96,6 +115,31 @@ class ObservationManager(Node):
         self._last_observation_id = ""
         self._last_reason = "waiting for synchronized RGB-D"
         self._exploring = False
+        self._finalizing = False
+        self._accepting = True
+        self._exploration_started_ns = 0
+        self._active_bundle: ObservationBundle | None = None
+        self._active_goal = None
+        self._active_started = 0.0
+        self._persistence_bundles: dict[str, ObservationBundle] = {}
+        self._pending_persistence: set[tuple[str, int]] = set()
+        self._environment_id = self._string_parameter("environment_id")
+        self._map_id = self._string_parameter("map_id")
+        if not re.fullmatch(r"[A-Za-z0-9_-]+", self._environment_id):
+            raise ValueError("environment_id may contain letters, numbers, _ and -")
+        if not re.fullmatch(r"[A-Za-z0-9_-]+", self._map_id):
+            raise ValueError("map_id may contain letters, numbers, _ and -")
+        storage_value = self._string_parameter("storage_root").strip()
+        storage_root = (
+            Path(storage_value).expanduser()
+            if storage_value
+            else Path.home() / ".local" / "share" / "flzat" / "environment_memory"
+        )
+        self._lifecycle_log = ObservationLifecycleLog(
+            storage_root / self._environment_id / "observations.jsonl",
+            self._environment_id,
+            self._map_id,
+        )
         self._map_frame = self._string_parameter("map_frame")
         self._base_frame = self._string_parameter("base_frame")
         self._camera_frame = self._string_parameter("camera_frame")
@@ -110,23 +154,26 @@ class ObservationManager(Node):
         )
         self._tf_timeout_s = self._float_parameter("tf_timeout_s")
         self._jpeg_quality = self._integer_parameter("debug_jpeg_quality")
-        detector_config = DetectorConfig(
-            confidence_threshold=self._float_parameter(
-                "detector_confidence_threshold"
-            ),
-            nms_iou_threshold=self._float_parameter("detector_nms_iou_threshold"),
-            max_detections=self._integer_parameter("detector_max_detections"),
-            ignored_classes=tuple(
-                str(value).strip().lower()
-                for value in self.get_parameter("detector_ignored_classes").value
-            ),
+        self._initial_settle_ns = int(
+            self._float_parameter("initial_settle_s") * 1_000_000_000
         )
-        verified_model = resolve_verified_model(
-            self._string_parameter("detector_model_path"),
-            self._string_parameter("detector_model_sha256"),
+        self._grounding_timeout_s = self._float_parameter(
+            "grounding_action_timeout_s"
         )
-        self._detector = UltralyticsYoloDetector(
-            str(verified_model), detector_config
+        self._grounding_max_detections = self._integer_parameter(
+            "grounding_max_detections"
+        )
+        if self._grounding_timeout_s <= 0.0:
+            raise ValueError("grounding_action_timeout_s must be positive")
+        if self._initial_settle_ns < 0:
+            raise ValueError("initial_settle_s cannot be negative")
+        if self._grounding_max_detections < 1:
+            raise ValueError("grounding_max_detections must be positive")
+        self._grounding_client = ActionClient(
+            self,
+            GroundObjects,
+            "/vlm/ground_objects",
+            callback_group=self._callback_group,
         )
         self._depth_config = DepthLocalizationConfig(
             central_fraction=self._float_parameter("depth_central_fraction"),
@@ -179,15 +226,15 @@ class ObservationManager(Node):
             "/environment_memory/debug_image",
             qos_profile_sensor_data,
         )
-        self._geometry_pub = self.create_publisher(
-            GeometricObjectObservation,
-            "/environment_memory/geometric_observations",
+        self._localized_pub = self.create_publisher(
+            LocalizedObjectObservation,
+            "/environment_memory/localized_observations",
             QoSProfile(depth=10, reliability=ReliabilityPolicy.RELIABLE),
         )
-        self._vlm_observation_pub = self.create_publisher(
-            VlmObservation,
-            "/environment_memory/vlm_observations",
-            QoSProfile(depth=2, reliability=ReliabilityPolicy.RELIABLE),
+        self._semantic_status_pub = self.create_publisher(
+            String,
+            "/environment_memory/semantic_status",
+            exploration_qos,
         )
         self.create_subscription(
             CameraInfo,
@@ -219,6 +266,13 @@ class ObservationManager(Node):
             self._on_exploration_status,
             exploration_qos,
         )
+        self.create_subscription(
+            String,
+            "/environment_memory/persistence_events",
+            self._on_persistence_event,
+            QoSProfile(depth=10, reliability=ReliabilityPolicy.RELIABLE),
+            callback_group=self._callback_group,
+        )
         self._rgb_sub = message_filters.Subscriber(
             self,
             Image,
@@ -240,10 +294,17 @@ class ObservationManager(Node):
         self._synchronizer.registerCallback(self._on_rgb_depth)
         self._tf_buffer = Buffer(cache_time=Duration(seconds=10.0))
         self._tf_listener = TransformListener(self._tf_buffer, self)
-        self.create_timer(0.1, self._process_next)
-        self.create_timer(1.0, self._publish_status)
+        self.create_timer(
+            0.1, self._process_next, callback_group=self._callback_group
+        )
+        self.create_timer(
+            1.0, self._publish_status, callback_group=self._callback_group
+        )
 
     def _declare_parameters(self) -> None:
+        self.declare_parameter("environment_id", "hotel_demo")
+        self.declare_parameter("map_id", "mapping-session")
+        self.declare_parameter("storage_root", "")
         self.declare_parameter("rgb_topic", "/camera/color/image_raw")
         self.declare_parameter("depth_topic", "/camera/depth/image_raw")
         self.declare_parameter("camera_info_topic", "/camera/camera_info")
@@ -263,21 +324,12 @@ class ObservationManager(Node):
         self.declare_parameter("max_interval_s", 20.0)
         self.declare_parameter("min_interval_s", 8.0)
         self.declare_parameter("waypoint_settle_s", 0.75)
+        self.declare_parameter("initial_settle_s", 1.0)
         self.declare_parameter("preferred_linear_speed_mps", 0.10)
         self.declare_parameter("preferred_angular_speed_rps", 0.15)
         self.declare_parameter("debug_jpeg_quality", 85)
-        self.declare_parameter(
-            "detector_model_path",
-            "~/.local/share/flzat/environment_memory/models/yolov8n-v8.3.0.pt",
-        )
-        self.declare_parameter(
-            "detector_model_sha256",
-            "f59b3d833e2ff32e194b5bb8e08d211dc7c5bdf144b90d2c8412c47ccfc83b36",
-        )
-        self.declare_parameter("detector_confidence_threshold", 0.35)
-        self.declare_parameter("detector_nms_iou_threshold", 0.50)
-        self.declare_parameter("detector_max_detections", 8)
-        self.declare_parameter("detector_ignored_classes", ["person"])
+        self.declare_parameter("grounding_action_timeout_s", 60.0)
+        self.declare_parameter("grounding_max_detections", 20)
         self.declare_parameter("depth_central_fraction", 0.60)
         self.declare_parameter("depth_minimum_m", 0.20)
         self.declare_parameter("depth_maximum_m", 10.0)
@@ -313,14 +365,35 @@ class ObservationManager(Node):
                     self._policy.mark_waypoint_completed(now_s)
 
     def _on_exploration_status(self, message: ExplorationStatus) -> None:
+        goal_to_cancel = None
         with self._lock:
+            was_exploring = self._exploring
             self._exploring = message.state == ExplorationStatus.EXPLORING
-            if not self._exploring:
+            if self._exploring and not was_exploring:
+                stamp_ns = _stamp_ns(message.stamp)
+                self._exploration_started_ns = (
+                    stamp_ns if stamp_ns > 0 else self.get_clock().now().nanoseconds
+                )
+                self._last_reason = "exploration started; waiting for stable capture"
+            elif message.state == ExplorationStatus.FINALIZING:
+                self._finalizing = True
+                self._last_reason = "exploration finalizing; draining observations"
+            elif message.state in {
+                ExplorationStatus.COMPLETED,
+                ExplorationStatus.FAILED,
+            }:
+                self._accepting = False
+                goal_to_cancel = self._active_goal
+                self._last_reason = f"exploration state {message.state}; stopped"
+            elif not self._exploring:
                 self._last_reason = f"exploration state {message.state}; capture paused"
+        if goal_to_cancel is not None:
+            goal_to_cancel.cancel_goal_async()
 
     def _on_rgb_depth(self, rgb: Image, depth: Image) -> None:
+        replaced_bundle = None
         with self._lock:
-            if not self._exploring:
+            if not self._exploring or not self._accepting:
                 return
         rgb_stamp_ns = _stamp_ns(rgb.header.stamp)
         depth_stamp_ns = _stamp_ns(depth.header.stamp)
@@ -381,6 +454,24 @@ class ObservationManager(Node):
                     self._policy.last_histogram, histogram
                 )
             linear_speed, angular_speed = self._speeds(odometry, rgb_stamp_ns)
+            if (
+                self._policy.last_histogram is None
+                and rgb_stamp_ns - self._exploration_started_ns
+                < self._initial_settle_ns
+            ):
+                self._last_reason = "waiting for initial settle interval"
+                return
+            if (
+                self._policy.last_histogram is None
+                and (
+                    abs(linear_speed)
+                    > self._policy.config.preferred_linear_speed_mps
+                    or abs(angular_speed)
+                    > self._policy.config.preferred_angular_speed_rps
+                )
+            ):
+                self._last_reason = "waiting for stable first frame"
+                return
             decision = self._policy.evaluate(
                 rgb_stamp_ns / 1_000_000_000.0,
                 pose,
@@ -408,15 +499,34 @@ class ObservationManager(Node):
             if not queued.accepted:
                 self._rejected += 1
                 self._last_reason = "higher-priority observation already pending"
+                self._log_bundle(bundle, "CAPTURED")
+                self._lifecycle_log.append(
+                    bundle.observation_id,
+                    "REJECTED",
+                    reason="higher-priority observation already pending",
+                )
                 return
             if queued.replaced is not None:
                 self._replaced += 1
+                replaced_bundle = queued.replaced
             self._policy.accept(
                 rgb_stamp_ns / 1_000_000_000.0, pose, histogram
             )
             self._accepted += 1
             self._last_observation_id = observation_id
             self._last_reason = decision.reason.value
+        if replaced_bundle is not None:
+            self._lifecycle_log.append(
+                replaced_bundle.observation_id,
+                "REJECTED",
+                reason="replaced by newer pending observation",
+            )
+        self._log_bundle(bundle, "CAPTURED")
+        self._lifecycle_log.append(
+            observation_id,
+            "VLM_QUEUED",
+            trigger_reason=bundle.trigger_reason,
+        )
 
     def _validate_sensor_bundle(
         self,
@@ -472,96 +582,427 @@ class ObservationManager(Node):
         return odometry.twist.twist.linear.x, odometry.twist.twist.angular.z
 
     def _process_next(self) -> None:
+        self._process_grounding_tick()
+
+    def _process_grounding_tick(self) -> None:
+        timed_out_bundle = None
+        goal_to_cancel = None
+        bundle_to_start = None
         with self._lock:
-            bundle = self._queue.begin_next()
-        if bundle is None:
-            return
+            if (
+                self._active_bundle is not None
+                and self._active_started > 0.0
+                and time.monotonic() - self._active_started
+                > self._grounding_timeout_s
+            ):
+                timed_out_bundle = self._active_bundle
+                goal_to_cancel = self._active_goal
+            elif self._active_bundle is None:
+                if not self._grounding_client.server_is_ready():
+                    self._last_reason = "waiting for GroundObjects action server"
+                    return
+                bundle_to_start = self._queue.begin_next()
+                if bundle_to_start is not None:
+                    self._active_bundle = bundle_to_start
+                    self._active_started = time.monotonic()
+                    self._last_reason = "grounding request active"
+        if timed_out_bundle is not None:
+            if goal_to_cancel is not None:
+                goal_to_cancel.cancel_goal_async()
+            self._finish_active_grounding(
+                timed_out_bundle,
+                "TIMED_OUT",
+                "GroundObjects action timeout",
+                rejected=True,
+            )
+        elif bundle_to_start is not None:
+            self._send_grounding(bundle_to_start)
+
+    def _send_grounding(self, bundle: ObservationBundle) -> None:
         try:
             bgr = image_to_bgr(bundle.rgb)
-            depth = image_to_depth_32fc1(bundle.depth)
-            self._validate_transform_bundle(bundle)
-            intrinsics = intrinsics_from_camera_matrix(
-                bundle.camera_info.width,
-                bundle.camera_info.height,
-                list(bundle.camera_info.k),
+            goal = GroundObjects.Goal()
+            goal.observation_id = bundle.observation_id
+            goal.stamp = bundle.rgb.header.stamp
+            goal.image = self._compressed_image(bundle, bgr)
+            self._lifecycle_log.append(
+                bundle.observation_id,
+                "VLM_ACTIVE",
             )
-            detections = list(self._detector.detect(bgr))
-            vlm_bgr = bgr.copy()
-            geometric_messages = []
-            with self._lock:
-                self._detections += len(detections)
-            for detection in detections:
-                try:
-                    localization = localize_detection(
-                        depth,
-                        (
-                            detection.x_min,
-                            detection.y_min,
-                            detection.x_max,
-                            detection.y_max,
-                        ),
-                        intrinsics,
-                        self._depth_config,
-                    )
-                    message = self._geometric_observation(
-                        bundle, detection, localization
-                    )
-                    geometric_messages.append(message)
-                    with self._lock:
-                        self._localized += 1
-                    annotation = (
-                        f"{detection.detection_id}:{detection.detector_class} "
-                        f"{detection.confidence:.2f} map="
-                        f"({message.map_position.point.x:.2f},"
-                        f"{message.map_position.point.y:.2f},"
-                        f"{message.map_position.point.z:.2f})"
-                    )
-                    self._draw_detection(
-                        bgr, localization.clamped_bbox, annotation, (0, 200, 0)
-                    )
-                    vlm_annotation = (
-                        f"{detection.detection_id}:{detection.detector_class} "
-                        f"{detection.confidence:.2f}"
-                    )
-                    self._draw_detection(
-                        vlm_bgr,
-                        localization.clamped_bbox,
-                        vlm_annotation,
-                        (0, 200, 0),
-                    )
-                except LocalizationError as exc:
-                    with self._lock:
-                        self._localization_rejected += 1
-                    bounds = self._display_bbox(detection, bgr.shape[1], bgr.shape[0])
-                    annotation = (
-                        f"{detection.detection_id}:{detection.detector_class} "
-                        f"rejected: {exc}"
-                    )
-                    self._draw_detection(bgr, bounds, annotation, (0, 0, 255))
-            self._publish_debug(bundle, bgr, len(detections))
-            for message in geometric_messages:
-                self._geometry_pub.publish(message)
-            if geometric_messages:
-                vlm_observation = VlmObservation()
-                vlm_observation.observation_id = bundle.observation_id
-                vlm_observation.observation_stamp = bundle.rgb.header.stamp
-                vlm_observation.image = self._compressed_image(bundle, vlm_bgr)
-                vlm_observation.detections = [
-                    copy.deepcopy(message.detection)
-                    for message in geometric_messages
-                ]
-                self._vlm_observation_pub.publish(vlm_observation)
+            future = self._grounding_client.send_goal_async(goal)
+            future.add_done_callback(
+                lambda completed, expected=bundle: self._on_grounding_goal(
+                    expected, completed
+                )
+            )
         except Exception as exc:
-            with self._lock:
-                self._localization_rejected += 1
-                self._last_reason = f"Phase 5 processing failed: {exc}"
-            self.get_logger().error(
-                f"Observation {bundle.observation_id} processing failed: {exc}"
+            self._finish_active_grounding(
+                bundle,
+                "REJECTED",
+                f"GroundObjects goal send failed: {exc}",
+                rejected=True,
             )
-        finally:
+
+    def _on_grounding_goal(self, bundle: ObservationBundle, future) -> None:
+        try:
+            goal_handle = future.result()
+            if goal_handle is None or not goal_handle.accepted:
+                raise RuntimeError("GroundObjects goal was rejected")
             with self._lock:
-                self._queue.complete()
-            self._publish_status()
+                if self._active_bundle is not bundle:
+                    goal_handle.cancel_goal_async()
+                    return
+                self._active_goal = goal_handle
+            goal_handle.get_result_async().add_done_callback(
+                lambda completed, expected=bundle: self._on_grounding_result(
+                    expected, completed
+                )
+            )
+        except Exception as exc:
+            self._finish_active_grounding(
+                bundle,
+                "REJECTED",
+                f"GroundObjects goal failed: {exc}",
+                rejected=True,
+            )
+
+    def _on_grounding_result(self, bundle: ObservationBundle, future) -> None:
+        with self._lock:
+            if self._active_bundle is not bundle:
+                late_result = True
+            else:
+                late_result = False
+                # The action completed within its deadline. Disable the action
+                # timeout while deterministic local post-processing runs.
+                self._active_started = 0.0
+        if late_result:
+            self._lifecycle_log.append(
+                bundle.observation_id,
+                "REJECTED",
+                reason="late GroundObjects result arrived after bundle release",
+            )
+            return
+        try:
+            response = future.result()
+            if response.status != GoalStatus.STATUS_SUCCEEDED:
+                raise RuntimeError(f"GroundObjects action status {response.status}")
+            result = response.result
+            if not result.success:
+                raise RuntimeError(result.error_message or "grounding failed")
+            if result.observation_id != bundle.observation_id:
+                raise RuntimeError("GroundObjects result observation_id mismatch")
+            detections = self._validated_grounding_detections(
+                bundle, result.detections
+            )
+            self._lifecycle_log.append(
+                bundle.observation_id,
+                "BBOX_VALIDATED",
+                model_id=result.model_id,
+                model_revision=result.model_revision,
+                prompt_version=result.prompt_version,
+                raw_response=result.raw_response,
+                detections=[self._detection_payload(item) for item in detections],
+            )
+            published = self._localize_and_publish(
+                bundle,
+                detections,
+            )
+            if not detections:
+                self._lifecycle_log.append(
+                    bundle.observation_id,
+                    "STORED",
+                    empty_observation=True,
+                )
+            elif published == 0:
+                raise RuntimeError("all grounded boxes failed depth localization")
+            self._finish_active_grounding(
+                bundle,
+                "",
+                f"grounded {len(detections)} objects; published {published}",
+                rejected=False,
+            )
+        except Exception as exc:
+            self._finish_active_grounding(
+                bundle,
+                "REJECTED",
+                f"grounding result rejected: {exc}",
+                rejected=True,
+            )
+
+    def _validated_grounding_detections(
+        self,
+        bundle: ObservationBundle,
+        messages,
+    ) -> list[GroundedDetection]:
+        return validate_grounding_detections(
+            bundle.observation_id,
+            int(bundle.rgb.width),
+            int(bundle.rgb.height),
+            messages,
+            self._grounding_max_detections,
+        )
+
+    def _localize_and_publish(
+        self,
+        bundle: ObservationBundle,
+        detections: list[GroundedDetection],
+    ) -> int:
+        bgr = image_to_bgr(bundle.rgb)
+        depth = image_to_depth_32fc1(bundle.depth)
+        self._validate_transform_bundle(bundle)
+        intrinsics = intrinsics_from_camera_matrix(
+            bundle.camera_info.width,
+            bundle.camera_info.height,
+            list(bundle.camera_info.k),
+        )
+        evidence_bgr = bgr.copy()
+        localized_geometry = []
+        with self._lock:
+            self._detections += len(detections)
+        for detection in detections:
+            try:
+                localization = localize_detection(
+                    depth,
+                    (
+                        detection.x_min,
+                        detection.y_min,
+                        detection.x_max,
+                        detection.y_max,
+                    ),
+                    intrinsics,
+                    self._depth_config,
+                )
+                message = self._localized_geometry(
+                    bundle, detection, localization
+                )
+                localized_geometry.append(message)
+                with self._lock:
+                    self._localized += 1
+                annotation = (
+                    f"{detection.detection_id}:{detection.detector_class} "
+                    f"{detection.confidence:.2f} map="
+                    f"({message.map_position.point.x:.2f},"
+                    f"{message.map_position.point.y:.2f},"
+                    f"{message.map_position.point.z:.2f})"
+                )
+                self._draw_detection(
+                    bgr, localization.clamped_bbox, annotation, (0, 200, 0)
+                )
+                vlm_annotation = (
+                    f"{detection.detection_id}:{detection.detector_class} "
+                    f"{detection.confidence:.2f}"
+                )
+                self._draw_detection(
+                    evidence_bgr,
+                    localization.clamped_bbox,
+                    vlm_annotation,
+                    (0, 200, 0),
+                )
+                self._lifecycle_log.append(
+                    bundle.observation_id,
+                    "LOCALIZED",
+                    **self._localization_payload(message, localization),
+                )
+            except LocalizationError as exc:
+                with self._lock:
+                    self._localization_rejected += 1
+                bounds = self._display_bbox(detection, bgr.shape[1], bgr.shape[0])
+                annotation = (
+                    f"{detection.detection_id}:{detection.detector_class} "
+                    f"rejected: {exc}"
+                )
+                self._draw_detection(bgr, bounds, annotation, (0, 0, 255))
+                self._lifecycle_log.append(
+                    bundle.observation_id,
+                    "REJECTED",
+                    detection_id=detection.detection_id,
+                    label=detection.detector_class,
+                    reason=f"depth localization failed: {exc}",
+                )
+        self._publish_debug(bundle, bgr, len(detections))
+        if not localized_geometry:
+            return 0
+        evidence = self._compressed_image(bundle, evidence_bgr)
+        with self._lock:
+            self._persistence_bundles[bundle.observation_id] = bundle
+            for message in localized_geometry:
+                self._pending_persistence.add(
+                    (bundle.observation_id, int(message.detection.detection_id))
+                )
+        for geometry in localized_geometry:
+            self._lifecycle_log.append(
+                bundle.observation_id,
+                "PERSISTING",
+                detection_id=int(geometry.detection.detection_id),
+                label=geometry.detection.detector_class,
+            )
+            self._localized_pub.publish(
+                self._minimal_localized_observation(bundle, geometry, evidence)
+            )
+        return len(localized_geometry)
+
+    def _finish_active_grounding(
+        self,
+        bundle: ObservationBundle,
+        state: str,
+        reason: str,
+        *,
+        rejected: bool,
+    ) -> None:
+        with self._lock:
+            if self._active_bundle is not bundle:
+                return
+            if state:
+                self._lifecycle_log.append(
+                    bundle.observation_id, state, reason=reason
+                )
+            self._queue.complete()
+            self._active_bundle = None
+            self._active_goal = None
+            self._active_started = 0.0
+            if rejected:
+                self._rejected += 1
+            self._last_reason = reason
+        self._publish_status()
+
+    def _on_persistence_event(self, message: String) -> None:
+        try:
+            payload = json.loads(message.data)
+            observation_id = str(payload["observation_id"])
+            detection_id = int(payload["detection_id"])
+            state = str(payload["state"])
+            if state not in {"STORED", "REJECTED"}:
+                raise ValueError("unsupported persistence state")
+        except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
+            with self._lock:
+                self._last_reason = f"invalid persistence event: {exc}"
+            return
+        key = (observation_id, detection_id)
+        with self._lock:
+            if key not in self._pending_persistence:
+                return
+            self._lifecycle_log.append(
+                observation_id,
+                state,
+                detection_id=detection_id,
+                object_id=str(payload.get("object_id", "")),
+                created=payload.get("created"),
+                seen_count=payload.get("seen_count"),
+                reason=str(payload.get("reason", "")),
+            )
+            self._pending_persistence.remove(key)
+            if not any(item[0] == observation_id for item in self._pending_persistence):
+                self._persistence_bundles.pop(observation_id, None)
+        self._publish_status()
+
+    def _minimal_localized_observation(
+        self,
+        bundle: ObservationBundle,
+        geometry: LocalizedGeometry,
+        evidence: CompressedImage,
+    ) -> LocalizedObjectObservation:
+        semantic = SemanticObject()
+        semantic.detection_id = geometry.detection.detection_id
+        semantic.label = geometry.detection.detector_class
+        semantic.description = (
+            "visually grounded "
+            + geometry.detection.detector_class.replace("_", " ")
+        )
+        semantic.attribute_keys = []
+        semantic.attribute_values = []
+        semantic.relationships = []
+        semantic.useful = True
+        semantic.confidence = geometry.detection.confidence
+
+        message = LocalizedObjectObservation()
+        message.environment_id = self._environment_id
+        message.map_id = self._map_id
+        message.observation_id = bundle.observation_id
+        message.observation_stamp = geometry.observation_stamp
+        message.depth_stamp = geometry.depth_stamp
+        message.semantic = semantic
+        message.detection = copy.deepcopy(geometry.detection)
+        message.map_position = copy.deepcopy(geometry.map_position)
+        message.robot_pose = copy.deepcopy(geometry.robot_pose)
+        message.scene = "indoor_environment"
+        message.localization_quality = geometry.localization_quality
+        message.image_ref = ""
+        message.image = copy.deepcopy(evidence)
+        return message
+
+    def _log_bundle(self, bundle: ObservationBundle, state: str) -> None:
+        camera = bundle.camera_transform.transform
+        robot = bundle.robot_transform.transform
+        self._lifecycle_log.append(
+            bundle.observation_id,
+            state,
+            rgb_stamp_ns=_stamp_ns(bundle.rgb.header.stamp),
+            depth_stamp_ns=_stamp_ns(bundle.depth.header.stamp),
+            camera_info_stamp_ns=_stamp_ns(bundle.camera_info.header.stamp),
+            scan_stamp_ns=bundle.scan_stamp_ns,
+            sync_delta_ns=bundle.sync_delta_ns,
+            trigger_reason=bundle.trigger_reason,
+            rgb_frame=bundle.rgb.header.frame_id,
+            map_frame=bundle.camera_transform.header.frame_id,
+            camera_translation=[
+                camera.translation.x,
+                camera.translation.y,
+                camera.translation.z,
+            ],
+            camera_quaternion_xyzw=[
+                camera.rotation.x,
+                camera.rotation.y,
+                camera.rotation.z,
+                camera.rotation.w,
+            ],
+            robot_translation=[
+                robot.translation.x,
+                robot.translation.y,
+                robot.translation.z,
+            ],
+            robot_quaternion_xyzw=[
+                robot.rotation.x,
+                robot.rotation.y,
+                robot.rotation.z,
+                robot.rotation.w,
+            ],
+            tf_status="exact_timestamp",
+        )
+
+    @staticmethod
+    def _detection_payload(detection: GroundedDetection) -> dict:
+        return {
+            "detection_id": detection.detection_id,
+            "label": detection.detector_class,
+            "confidence": detection.confidence,
+            "bbox_pixel_xyxy": [
+                int(detection.x_min),
+                int(detection.y_min),
+                int(detection.x_max),
+                int(detection.y_max),
+            ],
+        }
+
+    @staticmethod
+    def _localization_payload(
+        message: LocalizedGeometry,
+        localization: DepthLocalizationResult,
+    ) -> dict:
+        return {
+            "detection_id": int(message.detection.detection_id),
+            "label": message.detection.detector_class,
+            "bbox_pixel_xyxy": list(localization.clamped_bbox),
+            "valid_depth_ratio": localization.valid_depth_ratio,
+            "depth_mad_m": localization.depth_mad_m,
+            "localization_quality": localization.localization_quality,
+            "camera_xyz": [localization.x, localization.y, localization.z],
+            "map_xyz": [
+                message.map_position.point.x,
+                message.map_position.point.y,
+                message.map_position.point.z,
+            ],
+            "tf_status": "exact_timestamp",
+        }
 
     def _reject(self, reason: str) -> None:
         with self._lock:
@@ -571,6 +1012,7 @@ class ObservationManager(Node):
     def _publish_status(self) -> None:
         with self._lock:
             payload = {
+                "backend": "vlm_grounding",
                 "accepted": self._accepted,
                 "rejected": self._rejected,
                 "replaced": self._replaced,
@@ -581,9 +1023,40 @@ class ObservationManager(Node):
                 "last_reason": self._last_reason,
                 "active": self._queue.active,
                 "pending": self._queue.has_pending,
+                "pending_persistence": len(self._pending_persistence),
+            }
+            semantic_payload = {
+                "ready": (
+                    self._grounding_client.server_is_ready()
+                    and self._accepting
+                ),
+                "accepting": self._accepting,
+                "active": self._active_bundle is not None,
+                "pending": self._queue.has_pending,
+                "observation_drained": (
+                    not self._queue.active and not self._queue.has_pending
+                ),
+                "drained": (
+                    self._finalizing
+                    and self._active_bundle is None
+                    and not self._queue.active
+                    and not self._queue.has_pending
+                    and not self._pending_persistence
+                ),
+                "pending_persistence": len(self._pending_persistence),
+                "last_reason": self._last_reason,
             }
         self._status_pub.publish(
             String(data=json.dumps(payload, separators=(",", ":"), sort_keys=True))
+        )
+        self._semantic_status_pub.publish(
+            String(
+                data=json.dumps(
+                    semantic_payload,
+                    separators=(",", ":"),
+                    sort_keys=True,
+                )
+            )
         )
 
     def _validate_transform_bundle(self, bundle: ObservationBundle) -> None:
@@ -607,12 +1080,12 @@ class ObservationManager(Node):
             expected_stamp_ns=stamp_ns,
         )
 
-    def _geometric_observation(
+    def _localized_geometry(
         self,
         bundle: ObservationBundle,
-        detection: Detection2D,
+        detection: GroundedDetection,
         localization: DepthLocalizationResult,
-    ) -> GeometricObjectObservation:
+    ) -> LocalizedGeometry:
         camera_transform = bundle.camera_transform.transform
         map_xyz = transform_point(
             (localization.x, localization.y, localization.z),
@@ -642,11 +1115,6 @@ class ObservationManager(Node):
             detection_message.y_max,
         ) = localization.clamped_bbox
 
-        camera_position = PointStamped()
-        camera_position.header = copy.deepcopy(bundle.rgb.header)
-        camera_position.point.x = localization.x
-        camera_position.point.y = localization.y
-        camera_position.point.z = localization.z
         map_position = PointStamped()
         map_position.header.stamp = bundle.rgb.header.stamp
         map_position.header.frame_id = self._map_frame
@@ -662,21 +1130,14 @@ class ObservationManager(Node):
             bundle.robot_transform.transform.rotation
         )
 
-        message = GeometricObjectObservation()
-        message.observation_id = bundle.observation_id
-        message.observation_stamp = bundle.rgb.header.stamp
-        message.depth_stamp = bundle.depth.header.stamp
-        message.detection = detection_message
-        message.camera_position = camera_position
-        message.map_position = map_position
-        message.robot_pose = robot_pose
-        message.valid_depth_ratio = localization.valid_depth_ratio
-        message.depth_mad_m = localization.depth_mad_m
-        message.localization_quality = localization.localization_quality
-        message.geometric_confidence = min(
-            detection.confidence, localization.localization_quality
+        return LocalizedGeometry(
+            observation_stamp=copy.deepcopy(bundle.rgb.header.stamp),
+            depth_stamp=copy.deepcopy(bundle.depth.header.stamp),
+            detection=detection_message,
+            map_position=map_position,
+            robot_pose=robot_pose,
+            localization_quality=localization.localization_quality,
         )
-        return message
 
     def _publish_debug(
         self, bundle: ObservationBundle, bgr, detection_count: int
@@ -716,7 +1177,7 @@ class ObservationManager(Node):
 
     @staticmethod
     def _display_bbox(
-        detection: Detection2D, width: int, height: int
+        detection: GroundedDetection, width: int, height: int
     ) -> tuple[int, int, int, int]:
         x_min = max(0, min(width - 1, int(detection.x_min)))
         y_min = max(0, min(height - 1, int(detection.y_min)))
@@ -747,6 +1208,9 @@ class ObservationManager(Node):
 
     def _integer_parameter(self, name: str) -> int:
         return self.get_parameter(name).get_parameter_value().integer_value
+
+    def _boolean_parameter(self, name: str) -> bool:
+        return self.get_parameter(name).get_parameter_value().bool_value
 
 
 def main(args=None) -> None:
