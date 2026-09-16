@@ -54,6 +54,27 @@ environment_memory/
 
 ## Môi trường Ubuntu
 
+Máy mới Ubuntu 24.04 x86_64: chép/clone mã nguồn
+`flzat_enviroment_memory` vào thư mục dự định chứa cả ba workspace, rồi chạy
+**một lệnh** từ thư mục cha đó:
+
+```bash
+bash flzat_enviroment_memory/tools/setup_new_machine.sh
+```
+
+Script tự cài ROS 2 Jazzy, Gazebo Harmonic, Nav2, SLAM Toolbox, Miniconda
+`py312`, thư viện Python/audio, Git LFS, nguồn frontier-exploration, tải model mặc định
+và build cả ba workspace. Chạy bằng user thường; script sẽ hỏi `sudo` khi cài
+gói hệ thống. Nếu chỉ có repo memory, script tự clone hai repo còn thiếu.
+Chỉ chuyển **mã nguồn**, không chuyển `build/`, `install/`, `log/` từ máy cũ;
+script sẽ dừng nếu thấy các thư mục build cũ. Cần mạng và dung lượng đáng kể
+để tải các model. Driver NVIDIA/CUDA phụ thuộc GPU máy mới và cần kiểm tra
+riêng. Map, ảnh và Chroma dưới `~/.local/share/flzat/environment_memory/`
+không nằm trong Git, muốn dùng lại phải chép riêng. Có thể bỏ qua tải model
+ban đầu bằng `FLZAT_PREFETCH_MODELS=0 bash flzat_enviroment_memory/tools/setup_new_machine.sh`.
+Script dùng NumPy 2.4.6 giống môi trường `py312` hiện tại; không chạy thêm
+`pip install -r requirements-memory.txt` vì file đó còn ghim NumPy 1.26.4.
+
 Runtime đã kiểm thử dùng Conda `py312`:
 
 ```bash
