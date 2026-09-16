@@ -19,6 +19,7 @@ def generate_launch_description():
         PythonLaunchDescriptionSource(
             str(audio_share / "launch" / "speech_services.launch.py")
         ),
+        condition=IfCondition(LaunchConfiguration("enable_speech")),
         launch_arguments={
             "vad_silence_ms": LaunchConfiguration("vad_silence_ms"),
             "whisper_language": LaunchConfiguration("whisper_language"),
@@ -52,6 +53,7 @@ def generate_launch_description():
             DeclareLaunchArgument(
                 "embedding_local_files_only", default_value="false"
             ),
+            DeclareLaunchArgument("enable_speech", default_value="true"),
             DeclareLaunchArgument("vad_silence_ms", default_value="500"),
             DeclareLaunchArgument("whisper_language", default_value="en"),
             DeclareLaunchArgument("enable_shared_vlm", default_value="true"),

@@ -1,4 +1,5 @@
 from pathlib import Path
+import re
 
 
 PACKAGE_ROOT = Path(__file__).parents[1]
@@ -56,6 +57,21 @@ def test_assistant_binds_completed_manifest_to_amcl_and_read_only_runtime():
     assert 'executable="memory_manager"' not in combined
     assert "voice_pipeline.launch.py" not in combined
     assert "audio_loopback_node" not in combined
+
+
+def test_assistant_can_disable_speech_without_disabling_text_commands():
+    source = launch_source("memory_assistant.launch.py")
+    runtime = launch_source("assistant_runtime.launch.py")
+
+    assert '"enable_speech": LaunchConfiguration("enable_speech")' in source
+    assert re.search(
+        r'DeclareLaunchArgument\(\s*"enable_speech",\s*default_value="true"',
+        source,
+    )
+    assert 'condition=IfCondition(LaunchConfiguration("enable_speech"))' in runtime
+    assert 'DeclareLaunchArgument("enable_speech", default_value="true")' in runtime
+    assert 'executable="memory_command_manager"' in runtime
+    assert 'executable="memory_query_server"' in runtime
 
 
 def test_public_launches_keep_phase10_acceptance_out_of_runtime():

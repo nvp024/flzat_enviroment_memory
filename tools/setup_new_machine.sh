@@ -62,7 +62,7 @@ done
 step "Install ROS 2 Jazzy, Gazebo Harmonic, Nav2 and SLAM Toolbox"
 ros_apt_version="$(curl --fail --silent --show-error \
   https://api.github.com/repos/ros-infrastructure/ros-apt-source/releases/latest \
-  | awk -F'"' '/"tag_name"/ {print $4; exit}')"
+  | awk -F'"' '/"tag_name"/ {version=$4} END {print version}')"
 [[ -n "$ros_apt_version" ]] || fail "Could not determine the ROS apt-source version."
 ros_apt_deb="$(mktemp --suffix=.deb)"
 trap 'rm -f -- "$ros_apt_deb"' EXIT

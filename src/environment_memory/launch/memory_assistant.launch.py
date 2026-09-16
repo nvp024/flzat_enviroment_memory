@@ -67,6 +67,7 @@ def _assistant_actions(context):
             "embedding_local_files_only": LaunchConfiguration(
                 "embedding_local_files_only"
             ),
+            "enable_speech": LaunchConfiguration("enable_speech"),
             "vad_silence_ms": LaunchConfiguration("vad_silence_ms"),
             "whisper_language": LaunchConfiguration("whisper_language"),
             "enable_shared_vlm": "true",
@@ -109,6 +110,11 @@ def generate_launch_description():
             DeclareLaunchArgument("embedding_device", default_value="cpu"),
             DeclareLaunchArgument(
                 "embedding_local_files_only", default_value="false"
+            ),
+            DeclareLaunchArgument(
+                "enable_speech",
+                default_value="true",
+                description="Start VAD, STT and TTS; disable for text-only use.",
             ),
             DeclareLaunchArgument("vad_silence_ms", default_value="500"),
             DeclareLaunchArgument("whisper_language", default_value="en"),

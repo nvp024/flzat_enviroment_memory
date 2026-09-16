@@ -127,6 +127,10 @@ ros2 launch environment_memory memory_assistant.launch.py \
 Không truyền `map_id` thì hệ thống dùng map ID trong completed manifest của
 đúng `environment_id`; nó không tự chọn environment mới nhất.
 
+Trên máy không có microphone (ví dụ EC2), thêm `enable_speech:=false` vào lệnh
+launch. VAD/STT/TTS sẽ không khởi động; lệnh text, RAG, Gazebo và Nav2 vẫn chạy.
+Tuỳ chọn này không tắt shared VLM.
+
 Gửi lệnh không qua VAD/STT:
 
 ```bash
