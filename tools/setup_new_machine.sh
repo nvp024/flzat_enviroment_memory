@@ -19,6 +19,9 @@ robot_ws="$project_root/flzat_robot_ws"
 memory_ws="$project_root/flzat_enviroment_memory"
 conda_dir="${FLZAT_MINICONDA_DIR:-$HOME/miniconda3}"
 conda_env="py312"
+prefetch_models="${FLZAT_PREFETCH_MODELS:-1}"
+setup_state_dir="${XDG_STATE_HOME:-$HOME/.local/state}/flzat"
+setup_state_file="$setup_state_dir/setup_new_machine_$(printf '%s' "$project_root" | sha256sum | cut -d ' ' -f 1).state"
 
 [[ $EUID -ne 0 ]] || fail "Run as your normal user; do not prefix this script with sudo."
 [[ -r /etc/os-release ]] || fail "Cannot identify the operating system."
@@ -50,11 +53,16 @@ fi
 [[ -f "$robot_ws/src/vlm_pipeline/package.xml" ]] ||
   fail "Robot workspace is incomplete: $robot_ws"
 
-# Colcon-generated paths contain machine-specific prefixes. Never reuse them.
+# Colcon-generated paths contain machine-specific prefixes. Only resume a build
+# started by this script on the same machine and at the same absolute path.
+[[ -r /etc/machine-id ]] || fail "Cannot identify this machine to validate existing build artifacts."
+setup_identity="$(< /etc/machine-id) $project_root"
 for workspace_dir in "$openarm_ws" "$robot_ws" "$memory_ws"; do
   for generated_dir in build install log; do
-    if [[ -e "$workspace_dir/$generated_dir" ]]; then
-      fail "Found $workspace_dir/$generated_dir. Move old build/install/log folders aside before running on the new machine."
+    if [[ -e "$workspace_dir/$generated_dir" || -L "$workspace_dir/$generated_dir" ]]; then
+      if [[ ! -f "$setup_state_file" || $(< "$setup_state_file") != "$setup_identity" ]]; then
+        fail "Found $workspace_dir/$generated_dir without a matching setup marker for this machine and path. Move old build/install/log folders aside before running on the new machine."
+      fi
     fi
   done
 done
@@ -118,13 +126,15 @@ python -c 'import sys; assert sys.version_info[:2] == (3, 12), "py312 must use P
 step "Install Python packages used by speech, VLM and environment memory"
 python -m pip install --upgrade pip wheel 'setuptools==79.0.1' colcon-common-extensions
 if [[ -n ${FLZAT_TORCH_INDEX_URL:-} ]]; then
-  python -m pip install --index-url "$FLZAT_TORCH_INDEX_URL" 'torch==2.13.0'
+  python -m pip install --index-url "$FLZAT_TORCH_INDEX_URL" \
+    'torch==2.13.0' 'torchvision==0.28.0'
 else
-  python -m pip install 'torch==2.13.0'
+  python -m pip install 'torch==2.13.0' 'torchvision==0.28.0'
 fi
 python -m pip install \
   'transformers==5.14.1' \
   'qwen-vl-utils==0.0.14' \
+  'num2words==0.5.14' \
   'openai-whisper==20250625' \
   'sounddevice==0.5.5' \
   'pyttsx3==2.99' \
@@ -138,14 +148,18 @@ python -m pip install \
 
 step "Fetch the pinned frontier-exploration source and ROS dependencies"
 if [[ ! -d "$memory_ws/src/frontier_exploration_ros2" ]]; then
-  vcs import "$memory_ws/src" < "$memory_ws/environment_memory.repos"
+  vcs import "$memory_ws" < "$memory_ws/environment_memory.repos"
 fi
+[[ -f "$memory_ws/src/frontier_exploration_ros2/package.xml" ]] ||
+  fail "Frontier package was not fetched into $memory_ws/src/frontier_exploration_ros2."
 source_ros_setup /opt/ros/jazzy/setup.bash
 rosdep install --from-paths \
   "$openarm_ws/src" "$robot_ws/src" "$memory_ws/src" \
   --ignore-src -r -y --rosdistro jazzy --skip-keys ament_python
 
 step "Build OpenArm, robot and environment-memory workspaces"
+mkdir -p -- "$setup_state_dir"
+printf '%s\n' "$setup_identity" > "$setup_state_file"
 (
   cd "$openarm_ws"
   colcon build --symlink-install
@@ -162,7 +176,7 @@ source_ros_setup "$robot_ws/install/setup.bash"
 )
 source_ros_setup "$memory_ws/install/setup.bash"
 
-if [[ ${FLZAT_PREFETCH_MODELS:-1} == 1 ]]; then
+if [[ $prefetch_models == 1 ]]; then
   step "Download the default VLM and embedding models (several GB)"
   python - <<'PY'
 from huggingface_hub import snapshot_download
@@ -183,23 +197,55 @@ fi
 
 step "Verify installation"
 python -m pip check
-python - <<'PY'
+python - "$prefetch_models" <<'PY'
+import sys
+
 import chromadb
 import cv2
+import num2words
 import qwen_vl_utils
 import rclpy
 import sentence_transformers
 import sounddevice
 import torch
+import torchvision
 import transformers
 import whisper
-from transformers import Qwen3VLForConditionalGeneration
+from transformers import AutoProcessor, Qwen3VLForConditionalGeneration
+
+assert (
+    getattr(transformers, "AutoModelForImageTextToText", None)
+    or getattr(transformers, "AutoModelForMultimodalLM", None)
+), "Installed transformers has no SmolVLM2-compatible model class"
+
+device = "cuda" if torch.cuda.is_available() else "cpu"
+boxes = torch.tensor([[0.0, 0.0, 1.0, 1.0]], device=device)
+scores = torch.tensor([1.0], device=device)
+assert torchvision.ops.nms(boxes, scores, 0.5).tolist() == [0]
+
+if sys.argv[1] == "1":
+    for model_id in (
+        "Qwen/Qwen3-VL-2B-Instruct",
+        "HuggingFaceTB/SmolVLM2-500M-Video-Instruct",
+    ):
+        AutoProcessor.from_pretrained(model_id, local_files_only=True)
+        print(f"Local processor ready: {model_id}")
 
 print("ROS Python, OpenCV, audio, Chroma and VLM imports: OK")
-print(f"PyTorch: {torch.__version__}; CUDA available: {torch.cuda.is_available()}")
+print(f"PyTorch: {torch.__version__}; torchvision: {torchvision.__version__}")
+print(f"CUDA available: {torch.cuda.is_available()}")
+if torch.cuda.is_available():
+    print(f"CUDA GPU: {torch.cuda.get_device_name(0)}")
+else:
+    print("WARNING: CUDA is unavailable; VLM device:=cuda will not work.")
 PY
 ros2 --help >/dev/null
 gz sim --versions
+for package_name in \
+  openarm_skeleton_v1_2_navigation vlm_pipeline \
+  environment_memory frontier_exploration_ros2; do
+  ros2 pkg prefix "$package_name"
+done
 
 printf '\nInstallation complete. In each new terminal, run:\n'
 printf 'source %q\n' "$conda_dir/etc/profile.d/conda.sh"
