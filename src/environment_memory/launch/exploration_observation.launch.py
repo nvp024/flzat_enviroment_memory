@@ -12,6 +12,10 @@ from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
 
+from environment_memory.exploration.nav2_speed_profile import (
+    create_mode1_nav2_params,
+)
+
 
 def generate_launch_description():
     memory_share = Path(get_package_share_directory("environment_memory"))
@@ -20,6 +24,9 @@ def generate_launch_description():
     )
     frontier_share = Path(get_package_share_directory("frontier_exploration_ros2"))
     vlm_share = Path(get_package_share_directory("vlm_pipeline"))
+    mode1_nav2_params = create_mode1_nav2_params(
+        navigation_share / "config" / "nav2_params.yaml"
+    )
 
     navigation = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
@@ -32,6 +39,7 @@ def generate_launch_description():
             "use_rviz": LaunchConfiguration("use_rviz"),
             "use_sim_time": LaunchConfiguration("use_sim_time"),
             "autostart": "true",
+            "params_file": str(mode1_nav2_params),
             "transport_partition": LaunchConfiguration("transport_partition"),
         }.items(),
     )
@@ -112,6 +120,7 @@ def generate_launch_description():
                     "No retrieval or assistant behavior is launched."
                 )
             ),
+            LogInfo(msg=f"Mode 1 slow Nav2 parameters: {mode1_nav2_params}"),
             navigation,
             frontier,
             Node(

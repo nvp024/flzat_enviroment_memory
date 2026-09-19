@@ -18,7 +18,7 @@ setup(
         (f"share/{package_name}/launch", glob("launch/*.launch.py")),
         (f"share/{package_name}/config", glob("config/*.yaml")),
     ],
-    install_requires=["setuptools"],
+    install_requires=["setuptools", "PyYAML>=6.0"],
     zip_safe=True,
     maintainer="Simulation Team",
     maintainer_email="simulation-team@example.com",
