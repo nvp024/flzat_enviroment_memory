@@ -41,6 +41,24 @@ def test_frontier_configuration_uses_nav2_and_completion_hook():
     assert "autostart: false" in config
 
 
+def test_map_finalization_uses_active_nav2_map_saver():
+    source = (
+        PACKAGE_ROOT
+        / "environment_memory"
+        / "exploration"
+        / "memory_build_manager.py"
+    ).read_text(encoding="utf-8")
+
+    assert "from nav2_msgs.srv import SaveMap" in source
+    assert 'declare_parameter("map_save_service", "/map_saver/save_map")' in source
+    assert 'request.map_topic = "/map"' in source
+    assert 'request.image_format = "pgm"' in source
+    assert 'request.map_mode = "trinary"' in source
+    assert "request.free_thresh = 0.25" in source
+    assert "request.occupied_thresh = 0.65" in source
+    assert "from slam_toolbox.srv import SaveMap" not in source
+
+
 def test_observation_manager_locks_phase4_sensor_contracts():
     source = (
         PACKAGE_ROOT

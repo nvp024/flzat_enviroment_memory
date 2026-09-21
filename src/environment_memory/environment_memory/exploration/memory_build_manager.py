@@ -15,6 +15,7 @@ from frontier_exploration_ros2.srv import ControlExploration
 from geometry_msgs.msg import PoseStamped
 from lifecycle_msgs.srv import GetState
 from nav2_msgs.action import NavigateToPose
+from nav2_msgs.srv import SaveMap
 from nav_msgs.msg import OccupancyGrid, Path as NavPath
 from rclpy.action import ActionClient
 from rclpy.duration import Duration
@@ -30,7 +31,6 @@ from rclpy.qos import (
 from rclpy.signals import SignalHandlerOptions
 from rclpy.time import Time
 from sensor_msgs.msg import LaserScan
-from slam_toolbox.srv import SaveMap
 from std_msgs.msg import Empty, String
 from tf2_ros import Buffer, TransformException, TransformListener
 
@@ -177,7 +177,7 @@ class MemoryBuildManager(Node):
         self.declare_parameter("camera_frame", "camera_optical_frame")
         self.declare_parameter("completion_topic", "/exploration/complete")
         self.declare_parameter("control_service", "/control_exploration")
-        self.declare_parameter("map_save_service", "/slam_toolbox/save_map")
+        self.declare_parameter("map_save_service", "/map_saver/save_map")
         self.declare_parameter("map_output_path", "")
         self.declare_parameter("storage_root", "")
         self.declare_parameter("readiness_timeout_s", 120.0)
@@ -337,11 +337,16 @@ class MemoryBuildManager(Node):
             return
         if self._map_save_future is None:
             if not self._save_map_client.service_is_ready():
-                self._reason = "waiting for SLAM Toolbox save_map service"
+                self._reason = "waiting for Nav2 map_saver save_map service"
                 return
             self._map_output_path.parent.mkdir(parents=True, exist_ok=True)
             request = SaveMap.Request()
-            request.name = String(data=str(self._map_output_path))
+            request.map_topic = "/map"
+            request.map_url = str(self._map_output_path)
+            request.image_format = "pgm"
+            request.map_mode = "trinary"
+            request.free_thresh = 0.25
+            request.occupied_thresh = 0.65
             self._map_save_future = self._save_map_client.call_async(request)
             self._reason = f"saving map to {self._map_output_path}"
             return
@@ -352,7 +357,7 @@ class MemoryBuildManager(Node):
         except Exception as exc:
             self._fail(f"map save service failed: {exc}")
             return
-        if response is None or int(response.result) != 0:
+        if response is None or not response.result:
             result = "no response" if response is None else str(response.result)
             self._fail(f"map save failed with result {result}")
             return
