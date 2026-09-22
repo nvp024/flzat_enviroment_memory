@@ -7,7 +7,7 @@ from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, LogInfo
 from launch.launch_description_sources import PythonLaunchDescriptionSource
-from launch.substitutions import LaunchConfiguration
+from launch.substitutions import EnvironmentVariable, LaunchConfiguration
 
 
 def generate_launch_description():
@@ -19,6 +19,13 @@ def generate_launch_description():
         launch_arguments={
             "environment_id": LaunchConfiguration("environment_id"),
             "map_id": LaunchConfiguration("map_id"),
+            "simulator": LaunchConfiguration("simulator"),
+            "scene": LaunchConfiguration("scene"),
+            "start_isaac": LaunchConfiguration("start_isaac"),
+            "isaac_sim_path": LaunchConfiguration("isaac_sim_path"),
+            "startup_timeout": LaunchConfiguration("startup_timeout"),
+            "lidar_config": LaunchConfiguration("lidar_config"),
+            "max_frames": LaunchConfiguration("max_frames"),
             "headless": LaunchConfiguration("headless"),
             "use_rviz": LaunchConfiguration("use_rviz"),
             "use_sim_time": LaunchConfiguration("use_sim_time"),
@@ -60,6 +67,28 @@ def generate_launch_description():
                     "same incomplete build."
                 ),
             ),
+            DeclareLaunchArgument(
+                "simulator",
+                default_value="gazebo",
+                description="Simulation backend: gazebo or isaac",
+            ),
+            DeclareLaunchArgument(
+                "scene",
+                default_value="hotel",
+                description="Isaac scene: hotel or restaurant",
+            ),
+            DeclareLaunchArgument("start_isaac", default_value="true"),
+            DeclareLaunchArgument(
+                "isaac_sim_path",
+                default_value=EnvironmentVariable(
+                    "ISAAC_SIM_PATH", default_value=""
+                ),
+            ),
+            DeclareLaunchArgument("startup_timeout", default_value="600.0"),
+            DeclareLaunchArgument(
+                "lidar_config", default_value="Example_Rotary_2D"
+            ),
+            DeclareLaunchArgument("max_frames", default_value="0"),
             DeclareLaunchArgument("headless", default_value="false"),
             DeclareLaunchArgument("use_rviz", default_value="true"),
             DeclareLaunchArgument("use_sim_time", default_value="true"),
@@ -91,7 +120,8 @@ def generate_launch_description():
             DeclareLaunchArgument("vlm_local_files_only", default_value="false"),
             LogInfo(
                 msg=(
-                    "Autonomous memory-build mode: SLAM, Nav2, frontier "
+                    "Autonomous memory-build mode: selected simulator, SLAM, "
+                    "Nav2, frontier "
                     "exploration, frozen RGB-D observations, shared VLM analysis, "
                     "and writable persistent memory. No speech services are started."
                 )

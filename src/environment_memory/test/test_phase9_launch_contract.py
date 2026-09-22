@@ -74,6 +74,42 @@ def test_assistant_can_disable_speech_without_disabling_text_commands():
     assert 'executable="memory_query_server"' in runtime
 
 
+def test_both_public_modes_select_gazebo_by_default_or_isaac_explicitly():
+    autonomous = launch_source("autonomous_memory_build.launch.py")
+    exploration = launch_source("exploration_observation.launch.py")
+    assistant = launch_source("memory_assistant.launch.py")
+
+    assert re.search(
+        r'DeclareLaunchArgument\(\s*"simulator",\s*default_value="gazebo"',
+        autonomous,
+    )
+    assert '"simulator": LaunchConfiguration("simulator")' in autonomous
+    for source in (exploration, assistant):
+        assert 'simulator == "gazebo"' in source
+        assert 'simulator == "isaac"' in source
+        assert "all_in_one.launch.py" in source
+        assert "openarm_skeleton_v1_2_isaac" in source
+        assert "isaac_nav2.launch.py" in source
+        assert '"scene": LaunchConfiguration("scene")' in source
+        assert '"start_isaac": LaunchConfiguration("start_isaac")' in source
+        assert '"isaac_sim_path": LaunchConfiguration("isaac_sim_path")' in source
+        assert "use simulator:=gazebo or " in source
+        assert '"simulator",\n                default_value="gazebo"' in source
+
+    package_xml = (PACKAGE_ROOT / "package.xml").read_text(encoding="utf-8")
+    assert "<exec_depend>openarm_skeleton_v1_2_isaac</exec_depend>" in package_xml
+
+
+def test_mode1_and_mode2_pass_the_correct_mapping_mode_to_each_simulator():
+    exploration = launch_source("exploration_observation.launch.py")
+    assistant = launch_source("memory_assistant.launch.py")
+
+    assert exploration.count('"slam": "true"') == 2
+    assert exploration.count('"map": ""') == 2
+    assert assistant.count('"slam": "false"') == 1
+    assert assistant.count('"map": str(manifest.map_yaml)') == 1
+
+
 def test_public_launches_keep_phase10_acceptance_out_of_runtime():
     combined = launch_source("autonomous_memory_build.launch.py") + launch_source(
         "memory_assistant.launch.py"

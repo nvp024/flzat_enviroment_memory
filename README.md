@@ -1,7 +1,7 @@
 # FLZAT Environment Memory
 
-ROS 2 Jazzy workspace xây dựng bộ nhớ ngữ nghĩa cho robot trong Gazebo và dùng
-bộ nhớ đó để tìm kiếm, trả lời và điều hướng tới vật thể.
+ROS 2 Jazzy workspace xây dựng bộ nhớ ngữ nghĩa cho robot trong Gazebo hoặc
+Isaac Sim và dùng bộ nhớ đó để tìm kiếm, trả lời và điều hướng tới vật thể.
 
 ## Trạng thái hiện tại
 
@@ -17,6 +17,7 @@ thu tọa độ với ground truth SDF.
 | VLM bbox → depth + TF → memory | Đã implement; PASS unit/build, chưa replay thật |
 | Mode 2: load map + AMCL + Nav2 | PASS riêng lẻ |
 | Truy xuất Chroma và điều hướng bằng text command | PASS với RAG seeded |
+| Chọn `simulator:=gazebo\|isaac` trong hai public launch | PASS build/contract; Isaac runtime chưa chạy trên máy này |
 | Mode 1 → RAG thật → Mode 2 | Chưa hoàn thiện |
 | YOLO legacy | Đã xóa; Mode 1 chỉ còn VLM grounding |
 
@@ -28,7 +29,7 @@ output của lần chạy Mode 1.
 
 ```text
 Mode 1
-Gazebo → SLAM/Nav2 → frontier exploration → frozen RGB-D/TF observation
+Gazebo/Isaac → SLAM/Nav2 → frontier exploration → frozen RGB-D/TF observation
 → Qwen3-VL label + bbox → depth + TF → minimal record → Chroma + saved map
 
 Mode 2
@@ -98,10 +99,29 @@ source install/setup.bash
 ```bash
 ros2 launch environment_memory autonomous_memory_build.launch.py \
   environment_id:=hotel_demo \
+  simulator:=gazebo \
   headless:=false \
   use_rviz:=true \
   grounding_action_timeout_s:=300.0
 ```
+
+`simulator:=gazebo` là mặc định. Để chọn Isaac Sim 5.0 đã cài sẵn:
+
+```bash
+export ISAAC_SIM_PATH=/absolute/path/to/isaac-sim-5.0.0
+ros2 launch environment_memory autonomous_memory_build.launch.py \
+  environment_id:=isaac_hotel_demo \
+  map_id:=isaac_hotel_map_01 \
+  simulator:=isaac \
+  scene:=hotel \
+  headless:=false \
+  use_rviz:=true
+```
+
+Isaac integration hiện có LiDAR/odometry/TF cho SLAM, Nav2 và frontier nhưng
+chưa publish RGB-D topics. Vì vậy launch Mode 1 bằng Isaac đã được nối đúng,
+nhưng chưa thể tạo semantic observation cho tới khi bridge RGB-D Isaac được
+bổ sung. Build và test tĩnh không cài hoặc khởi động Isaac Sim.
 
 Nếu không truyền `map_id`, launch tự sinh UUID. Artifact mặc định được lưu tại:
 
@@ -121,8 +141,26 @@ Chỉ environment có `manifest.status=complete` mới được Mode 2 mở.
 ```bash
 ros2 launch environment_memory memory_assistant.launch.py \
   environment_id:=hotel_demo_14_seeded \
-  map_id:=a8228e3b-eb9d-467c-8230-006684dfbbec
+  map_id:=a8228e3b-eb9d-467c-8230-006684dfbbec \
+  simulator:=gazebo
 ```
+
+Mode 2 với Isaac dùng đúng scene, saved map và RAG đã tạo trong frame map của
+phiên Isaac tương ứng:
+
+```bash
+export ISAAC_SIM_PATH=/absolute/path/to/isaac-sim-5.0.0
+ros2 launch environment_memory memory_assistant.launch.py \
+  environment_id:=isaac_hotel_demo \
+  map_id:=isaac_hotel_map_01 \
+  simulator:=isaac \
+  scene:=hotel \
+  enable_speech:=false
+```
+
+Không dùng chéo map/RAG Gazebo với scene Isaac khác hình học. RViz vẫn hiển thị
+mọi occupancy map, nhưng AMCL và Nav2 chỉ đúng khi `/scan`, pose spawn và map
+khớp cùng môi trường.
 
 Không truyền `map_id` thì hệ thống dùng map ID trong completed manifest của
 đúng `environment_id`; nó không tự chọn environment mới nhất.

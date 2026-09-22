@@ -22,6 +22,7 @@
   <exec_depend>nav2_msgs</exec_depend>
   <exec_depend>nav_msgs</exec_depend>
   <exec_depend>openarm_skeleton_v1_2_navigation</exec_depend>
+  <exec_depend>openarm_skeleton_v1_2_isaac</exec_depend>
   <exec_depend>python3-pip</exec_depend>
   <exec_depend>python3-numpy</exec_depend>
   <exec_depend>python3-opencv</exec_depend>

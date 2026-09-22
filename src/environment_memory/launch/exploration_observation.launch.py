@@ -5,16 +5,82 @@ import uuid
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, LogInfo
+from launch.actions import (
+    DeclareLaunchArgument,
+    IncludeLaunchDescription,
+    LogInfo,
+    OpaqueFunction,
+)
 from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
-from launch.substitutions import LaunchConfiguration
+from launch.substitutions import EnvironmentVariable, LaunchConfiguration
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
 
 from environment_memory.exploration.nav2_speed_profile import (
     create_mode1_nav2_params,
 )
+
+
+def _simulator_navigation(context, navigation_share, mode1_nav2_params):
+    simulator = LaunchConfiguration("simulator").perform(context).strip().lower()
+    common_arguments = {
+        "headless": LaunchConfiguration("headless"),
+        "use_rviz": LaunchConfiguration("use_rviz"),
+        "use_sim_time": LaunchConfiguration("use_sim_time"),
+        "autostart": "true",
+        "params_file": str(mode1_nav2_params),
+    }
+    if simulator == "gazebo":
+        return [
+            LogInfo(msg="Mode 1 simulator: Gazebo Harmonic"),
+            IncludeLaunchDescription(
+                PythonLaunchDescriptionSource(
+                    str(navigation_share / "launch" / "all_in_one.launch.py")
+                ),
+                launch_arguments={
+                    **common_arguments,
+                    "slam": "true",
+                    "map": "",
+                    "transport_partition": LaunchConfiguration(
+                        "transport_partition"
+                    ),
+                }.items(),
+            ),
+        ]
+    if simulator == "isaac":
+        isaac_share = Path(
+            get_package_share_directory("openarm_skeleton_v1_2_isaac")
+        )
+        return [
+            LogInfo(
+                msg=(
+                    "Mode 1 simulator: Isaac Sim. The current Isaac package "
+                    "provides SLAM/Nav2 sensors but not RGB-D topics; semantic "
+                    "observations require the future Isaac RGB-D bridge."
+                )
+            ),
+            IncludeLaunchDescription(
+                PythonLaunchDescriptionSource(
+                    str(isaac_share / "launch" / "isaac_nav2.launch.py")
+                ),
+                launch_arguments={
+                    **common_arguments,
+                    "start_isaac": LaunchConfiguration("start_isaac"),
+                    "scene": LaunchConfiguration("scene"),
+                    "isaac_sim_path": LaunchConfiguration("isaac_sim_path"),
+                    "startup_timeout": LaunchConfiguration("startup_timeout"),
+                    "lidar_config": LaunchConfiguration("lidar_config"),
+                    "max_frames": LaunchConfiguration("max_frames"),
+                    "slam": "true",
+                    "map": "",
+                }.items(),
+            ),
+        ]
+    raise RuntimeError(
+        f"Unknown simulator {simulator!r}; use simulator:=gazebo or "
+        "simulator:=isaac"
+    )
 
 
 def generate_launch_description():
@@ -28,21 +94,6 @@ def generate_launch_description():
         navigation_share / "config" / "nav2_params.yaml"
     )
 
-    navigation = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(
-            str(navigation_share / "launch" / "all_in_one.launch.py")
-        ),
-        launch_arguments={
-            "slam": "true",
-            "map": "",
-            "headless": LaunchConfiguration("headless"),
-            "use_rviz": LaunchConfiguration("use_rviz"),
-            "use_sim_time": LaunchConfiguration("use_sim_time"),
-            "autostart": "true",
-            "params_file": str(mode1_nav2_params),
-            "transport_partition": LaunchConfiguration("transport_partition"),
-        }.items(),
-    )
     frontier = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
             str(frontier_share / "launch" / "frontier_explorer.launch.py")
@@ -75,6 +126,24 @@ def generate_launch_description():
         [
             DeclareLaunchArgument("environment_id", default_value="hotel_demo"),
             DeclareLaunchArgument("map_id", default_value=str(uuid.uuid4())),
+            DeclareLaunchArgument(
+                "simulator",
+                default_value="gazebo",
+                description="Simulation backend: gazebo or isaac",
+            ),
+            DeclareLaunchArgument("scene", default_value="hotel"),
+            DeclareLaunchArgument("start_isaac", default_value="true"),
+            DeclareLaunchArgument(
+                "isaac_sim_path",
+                default_value=EnvironmentVariable(
+                    "ISAAC_SIM_PATH", default_value=""
+                ),
+            ),
+            DeclareLaunchArgument("startup_timeout", default_value="600.0"),
+            DeclareLaunchArgument(
+                "lidar_config", default_value="Example_Rotary_2D"
+            ),
+            DeclareLaunchArgument("max_frames", default_value="0"),
             DeclareLaunchArgument("headless", default_value="false"),
             DeclareLaunchArgument("use_rviz", default_value="true"),
             DeclareLaunchArgument("use_sim_time", default_value="true"),
@@ -121,7 +190,10 @@ def generate_launch_description():
                 )
             ),
             LogInfo(msg=f"Mode 1 slow Nav2 parameters: {mode1_nav2_params}"),
-            navigation,
+            OpaqueFunction(
+                function=_simulator_navigation,
+                args=[navigation_share, mode1_nav2_params],
+            ),
             frontier,
             Node(
                 package="environment_memory",

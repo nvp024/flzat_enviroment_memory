@@ -12,7 +12,7 @@ from launch.actions import (
     OpaqueFunction,
 )
 from launch.launch_description_sources import PythonLaunchDescriptionSource
-from launch.substitutions import LaunchConfiguration
+from launch.substitutions import EnvironmentVariable, LaunchConfiguration
 
 from environment_memory.storage.readonly_memory import load_completed_manifest
 
@@ -36,24 +36,54 @@ def _assistant_actions(context):
         requested_map_id,
     )
 
-    navigation_share = Path(
-        get_package_share_directory("openarm_skeleton_v1_2_navigation")
-    )
+    simulator = LaunchConfiguration("simulator").perform(context).strip().lower()
     memory_share = Path(get_package_share_directory("environment_memory"))
-    navigation = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(
-            str(navigation_share / "launch" / "all_in_one.launch.py")
-        ),
-        launch_arguments={
-            "slam": "false",
-            "map": str(manifest.map_yaml),
-            "headless": LaunchConfiguration("headless"),
-            "use_rviz": LaunchConfiguration("use_rviz"),
-            "use_sim_time": LaunchConfiguration("use_sim_time"),
-            "autostart": "true",
-            "transport_partition": LaunchConfiguration("transport_partition"),
-        }.items(),
-    )
+    common_arguments = {
+        "slam": "false",
+        "map": str(manifest.map_yaml),
+        "headless": LaunchConfiguration("headless"),
+        "use_rviz": LaunchConfiguration("use_rviz"),
+        "use_sim_time": LaunchConfiguration("use_sim_time"),
+        "autostart": "true",
+    }
+    if simulator == "gazebo":
+        navigation_share = Path(
+            get_package_share_directory("openarm_skeleton_v1_2_navigation")
+        )
+        navigation = IncludeLaunchDescription(
+            PythonLaunchDescriptionSource(
+                str(navigation_share / "launch" / "all_in_one.launch.py")
+            ),
+            launch_arguments={
+                **common_arguments,
+                "transport_partition": LaunchConfiguration(
+                    "transport_partition"
+                ),
+            }.items(),
+        )
+    elif simulator == "isaac":
+        isaac_share = Path(
+            get_package_share_directory("openarm_skeleton_v1_2_isaac")
+        )
+        navigation = IncludeLaunchDescription(
+            PythonLaunchDescriptionSource(
+                str(isaac_share / "launch" / "isaac_nav2.launch.py")
+            ),
+            launch_arguments={
+                **common_arguments,
+                "start_isaac": LaunchConfiguration("start_isaac"),
+                "scene": LaunchConfiguration("scene"),
+                "isaac_sim_path": LaunchConfiguration("isaac_sim_path"),
+                "startup_timeout": LaunchConfiguration("startup_timeout"),
+                "lidar_config": LaunchConfiguration("lidar_config"),
+                "max_frames": LaunchConfiguration("max_frames"),
+            }.items(),
+        )
+    else:
+        raise RuntimeError(
+            f"Unknown simulator {simulator!r}; use simulator:=gazebo or "
+            "simulator:=isaac"
+        )
     assistant = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
             str(memory_share / "launch" / "assistant_runtime.launch.py")
@@ -82,7 +112,8 @@ def _assistant_actions(context):
             msg=(
                 "Memory-assistant mode: verified completed manifest "
                 f"environment={manifest.environment_id}, map={manifest.map_id}; "
-                "starting saved-map localization and read-only memory."
+                f"simulator={simulator}; starting saved-map localization and "
+                "read-only memory."
             )
         ),
         navigation,
@@ -103,6 +134,24 @@ def generate_launch_description():
                 ),
             ),
             DeclareLaunchArgument("storage_root", default_value=""),
+            DeclareLaunchArgument(
+                "simulator",
+                default_value="gazebo",
+                description="Simulation backend: gazebo or isaac",
+            ),
+            DeclareLaunchArgument("scene", default_value="hotel"),
+            DeclareLaunchArgument("start_isaac", default_value="true"),
+            DeclareLaunchArgument(
+                "isaac_sim_path",
+                default_value=EnvironmentVariable(
+                    "ISAAC_SIM_PATH", default_value=""
+                ),
+            ),
+            DeclareLaunchArgument("startup_timeout", default_value="600.0"),
+            DeclareLaunchArgument(
+                "lidar_config", default_value="Example_Rotary_2D"
+            ),
+            DeclareLaunchArgument("max_frames", default_value="0"),
             DeclareLaunchArgument("headless", default_value="false"),
             DeclareLaunchArgument("use_rviz", default_value="true"),
             DeclareLaunchArgument("use_sim_time", default_value="true"),
