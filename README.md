@@ -76,6 +76,25 @@ ban đầu bằng `FLZAT_PREFETCH_MODELS=0 bash flzat_enviroment_memory/tools/se
 Script dùng NumPy 2.4.6 giống môi trường `py312` hiện tại; không chạy thêm
 `pip install -r requirements-memory.txt` vì file đó còn ghim NumPy 1.26.4.
 
+Isaac Sim và NVIDIA driver được tách khỏi installer trên. Sau khi cài xong ba
+workspace, chạy script riêng sau bằng user thường (không thêm `sudo` ở đầu):
+
+```bash
+bash flzat_enviroment_memory/tools/setup_isaac_sim.sh
+```
+
+Script khóa Isaac Sim `5.0.0` và driver nhánh `580`, tự nhận biết EC2 để dùng
+profile server, tải/gỡ nén simulator vào `~/isaacsim` và không cài lại ROS,
+Gazebo, Conda hoặc model. Nếu driver vừa được cài thì phải reboot, source file
+`~/.config/flzat/isaac_sim_env.sh` rồi chạy OpenArm host checker. Máy đã có
+driver khác cần truyền tường minh `--allow-driver-switch`; có thể dùng file zip
+đã tải bằng `--archive PATH`.
+Xem toàn bộ tuỳ chọn bằng:
+
+```bash
+bash flzat_enviroment_memory/tools/setup_isaac_sim.sh --help
+```
+
 Runtime đã kiểm thử dùng Conda `py312`:
 
 ```bash

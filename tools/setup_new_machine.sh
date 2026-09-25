@@ -50,8 +50,20 @@ if [[ ! -d "$robot_ws" ]]; then
 fi
 [[ -f "$openarm_ws/src/openarm_skeleton_v1_2_gazebo/package.xml" ]] ||
   fail "OpenArm workspace is incomplete: $openarm_ws"
+[[ -f "$openarm_ws/src/openarm_skeleton_v1_2_isaac/package.xml" ]] ||
+  fail "OpenArm workspace does not contain the Isaac package. Pull the current main branch in $openarm_ws."
+[[ -f "$openarm_ws/src/openarm_skeleton_v1_2_isaac/scripts/isaac_sdf_scene.py" ]] ||
+  fail "OpenArm Isaac package is outdated: scripts/isaac_sdf_scene.py is missing. Pull the current main branch."
+[[ -f "$openarm_ws/src/openarm_skeleton_v1_2_gazebo/worlds/hotel_lobby_demo.sdf" ]] ||
+  fail "The shared Gazebo/Isaac hotel world is missing from $openarm_ws."
+[[ -f "$openarm_ws/scripts/run_isaac_nav2.sh" ]] ||
+  fail "OpenArm workspace is missing scripts/run_isaac_nav2.sh."
+[[ -f "$openarm_ws/scripts/check_isaac_host.sh" ]] ||
+  fail "OpenArm workspace is missing scripts/check_isaac_host.sh."
 [[ -f "$robot_ws/src/vlm_pipeline/package.xml" ]] ||
   fail "Robot workspace is incomplete: $robot_ws"
+[[ -f "$memory_ws/tools/setup_isaac_sim.sh" ]] ||
+  fail "The separate Isaac Sim installer is missing: $memory_ws/tools/setup_isaac_sim.sh"
 
 # Colcon-generated paths contain machine-specific prefixes. Only resume a build
 # started by this script on the same machine and at the same absolute path.
@@ -84,7 +96,8 @@ sudo apt-get install -y \
   ros-jazzy-desktop ros-jazzy-ros-gz \
   ros-jazzy-joint-state-publisher-gui \
   ros-jazzy-navigation2 ros-jazzy-nav2-bringup ros-jazzy-slam-toolbox \
-  ros-dev-tools python3-colcon-common-extensions python3-pytest python3-rosdep
+  ros-dev-tools python3-colcon-common-extensions python3-lark \
+  python3-pytest python3-rosdep
 if [[ ! -f /etc/ros/rosdep/sources.list.d/20-default.list ]]; then
   sudo rosdep init
 fi
@@ -143,6 +156,7 @@ python -m pip install \
   'chromadb==1.5.9' \
   'sentence-transformers==6.0.0' \
   'Pillow==12.3.0' \
+  'lark==1.3.1' \
   typeguard \
   pytest
 
@@ -202,6 +216,7 @@ import sys
 
 import chromadb
 import cv2
+import lark
 import num2words
 import qwen_vl_utils
 import rclpy
@@ -242,7 +257,7 @@ PY
 ros2 --help >/dev/null
 gz sim --versions
 for package_name in \
-  openarm_skeleton_v1_2_navigation vlm_pipeline \
+  openarm_skeleton_v1_2_navigation openarm_skeleton_v1_2_isaac vlm_pipeline \
   environment_memory frontier_exploration_ros2; do
   ros2 pkg prefix "$package_name"
 done
@@ -255,3 +270,5 @@ printf 'source %q\n' "$openarm_ws/install/setup.bash"
 printf 'source %q\n' "$robot_ws/install/setup.bash"
 printf 'source %q\n' "$memory_ws/install/setup.bash"
 printf '\nExisting maps and Chroma data are separate from Git and must be copied manually.\n'
+printf '\nNVIDIA driver and Isaac Sim are intentionally separate. Install them with:\n'
+printf 'bash %q\n' "$memory_ws/tools/setup_isaac_sim.sh"
